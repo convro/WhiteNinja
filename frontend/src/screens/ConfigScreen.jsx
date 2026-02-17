@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowLeft, Rocket, Settings2, Sliders, Palette } from 'lucide-react'
+import {
+  ArrowLeft, Rocket, Settings2, Sliders, Palette,
+  Sparkles, Layout, Target, Users, Zap, Package,
+  Globe, Star, Layers, Type
+} from 'lucide-react'
 import './ConfigScreen.css'
 
 const SITE_TYPES = [
@@ -26,10 +30,36 @@ const CODE_QUALITY = [
   { value: 'perfectionist', label: 'Perfectionist', desc: 'Every detail matters' },
 ]
 
-export default function ConfigScreen({ brief, config: initialConfig, onSubmit, onBack }) {
+const ICON_MAP = {
+  Palette, Layout, Target, Users, Zap, Package,
+  Globe, Star, Layers, Type, Settings2,
+}
+
+function AiBadge() {
+  return <span className="config-ai-badge"><Sparkles size={9} /> AI</span>
+}
+
+export default function ConfigScreen({ brief, config: initialConfig, suggestions, onSubmit, onBack }) {
   const [config, setConfig] = useState(initialConfig)
+  const [customAnswers, setCustomAnswers] = useState(() => {
+    const defaults = {}
+    suggestions?.customQuestions?.forEach(q => {
+      defaults[q.configKey] = q.defaultValue ?? q.options[0]?.value
+    })
+    return defaults
+  })
 
   const update = (key, value) => setConfig(prev => ({ ...prev, [key]: value }))
+  const updateCustom = (key, value) => setCustomAnswers(prev => ({ ...prev, [key]: value }))
+
+  const isSuggested = (field, value) => suggestions?.suggestedConfig?.[field] === value
+
+  const handleSubmit = () => {
+    onSubmit({ ...config, ...customAnswers })
+  }
+
+  const questions = suggestions?.customQuestions || []
+  const reasoning = suggestions?.reasoning
 
   return (
     <div className="config-screen">
@@ -52,7 +82,11 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
 
         <div className="config-title">
           <h2>Configure the Build</h2>
-          <p>Tune how the agents work. You can always change these mid-build.</p>
+          <p>
+            {reasoning
+              ? <><Sparkles size={12} className="config-title-sparkle" /> {reasoning}</>
+              : 'Tune how the agents work. You can always change these mid-build.'}
+          </p>
         </div>
 
         {/* Brief summary */}
@@ -62,6 +96,7 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
         </div>
 
         <div className="config-sections">
+
           {/* Site Type */}
           <div className="config-section">
             <div className="config-section-header">
@@ -69,16 +104,20 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
               <span>Site Type</span>
             </div>
             <div className="config-site-types">
-              {SITE_TYPES.map(type => (
-                <button
-                  key={type.value}
-                  className={`config-type-btn ${config.siteType === type.value ? 'active' : ''}`}
-                  onClick={() => update('siteType', type.value)}
-                >
-                  <span>{type.emoji}</span>
-                  <span>{type.label}</span>
-                </button>
-              ))}
+              {SITE_TYPES.map(type => {
+                const suggested = isSuggested('siteType', type.value)
+                return (
+                  <button
+                    key={type.value}
+                    className={`config-type-btn ${config.siteType === type.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    onClick={() => update('siteType', type.value)}
+                  >
+                    <span>{type.emoji}</span>
+                    <span>{type.label}</span>
+                    {suggested && <AiBadge />}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -89,22 +128,72 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
               <span>Style Preset</span>
             </div>
             <div className="config-presets">
-              {STYLE_PRESETS.map(preset => (
-                <button
-                  key={preset.value}
-                  className={`config-preset-btn ${config.stylePreset === preset.value ? 'active' : ''}`}
-                  onClick={() => update('stylePreset', preset.value)}
-                >
-                  <div className="config-preset-colors">
-                    {preset.preview.map((color, i) => (
-                      <div key={i} className="config-preset-swatch" style={{ background: color }} />
-                    ))}
-                  </div>
-                  <span>{preset.label}</span>
-                </button>
-              ))}
+              {STYLE_PRESETS.map(preset => {
+                const suggested = isSuggested('stylePreset', preset.value)
+                // Override the first swatch color with suggested primary color if this preset is suggested
+                const colors = (suggested && suggestions?.suggestedConfig?.primaryColor)
+                  ? [suggestions.suggestedConfig.primaryColor, ...preset.preview.slice(1)]
+                  : preset.preview
+                return (
+                  <button
+                    key={preset.value}
+                    className={`config-preset-btn ${config.stylePreset === preset.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    onClick={() => update('stylePreset', preset.value)}
+                  >
+                    <div className="config-preset-colors">
+                      {colors.map((color, i) => (
+                        <div key={i} className="config-preset-swatch" style={{ background: color }} />
+                      ))}
+                    </div>
+                    <span>{preset.label}</span>
+                    {suggested && <AiBadge />}
+                  </button>
+                )
+              })}
             </div>
           </div>
+
+          {/* Custom AI Questions */}
+          {questions.length > 0 && (
+            <div className="config-section config-section--ai">
+              <div className="config-section-header">
+                <Sparkles size={15} />
+                <span>Tailored for your project</span>
+                <span className="config-ai-tag">AI generated</span>
+              </div>
+              <div className="config-custom-questions">
+                {questions.map(q => {
+                  const IconComp = ICON_MAP[q.icon] || Target
+                  return (
+                    <div key={q.id} className="config-custom-question">
+                      <div className="config-custom-question-header">
+                        <IconComp size={13} />
+                        <span className="config-custom-question-label">{q.label}</span>
+                      </div>
+                      {q.description && (
+                        <div className="config-custom-question-desc">{q.description}</div>
+                      )}
+                      <div className="config-custom-opts">
+                        {q.options.map(opt => (
+                          <button
+                            key={opt.value}
+                            className={`config-custom-opt ${customAnswers[q.configKey] === opt.value ? 'active' : ''}`}
+                            onClick={() => updateCustom(q.configKey, opt.value)}
+                          >
+                            <span className="config-custom-opt-emoji">{opt.emoji}</span>
+                            <div className="config-custom-opt-info">
+                              <span className="config-custom-opt-label">{opt.label}</span>
+                              {opt.desc && <span className="config-custom-opt-desc">{opt.desc}</span>}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Agent Behavior */}
           <div className="config-section">
@@ -159,16 +248,22 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
               <span>Code Quality Mode</span>
             </div>
             <div className="config-quality-opts">
-              {CODE_QUALITY.map(q => (
-                <button
-                  key={q.value}
-                  className={`config-quality-btn ${config.codeQuality === q.value ? 'active' : ''}`}
-                  onClick={() => update('codeQuality', q.value)}
-                >
-                  <div className="config-quality-label">{q.label}</div>
-                  <div className="config-quality-desc">{q.desc}</div>
-                </button>
-              ))}
+              {CODE_QUALITY.map(q => {
+                const suggested = isSuggested('codeQuality', q.value)
+                return (
+                  <button
+                    key={q.value}
+                    className={`config-quality-btn ${config.codeQuality === q.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    onClick={() => update('codeQuality', q.value)}
+                  >
+                    <div className="config-quality-label">
+                      {q.label}
+                      {suggested && <AiBadge />}
+                    </div>
+                    <div className="config-quality-desc">{q.desc}</div>
+                  </button>
+                )
+              })}
             </div>
           </div>
 
@@ -187,7 +282,10 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
               ].map(toggle => (
                 <label key={toggle.key} className="config-toggle">
                   <div className="config-toggle-info">
-                    <span className="config-toggle-label">{toggle.label}</span>
+                    <span className="config-toggle-label">
+                      {toggle.label}
+                      {isSuggested(toggle.key, true) && config[toggle.key] && <AiBadge />}
+                    </span>
                     <span className="config-toggle-desc">{toggle.desc}</span>
                   </div>
                   <div
@@ -205,7 +303,7 @@ export default function ConfigScreen({ brief, config: initialConfig, onSubmit, o
         {/* Submit */}
         <motion.button
           className="btn btn-primary config-submit"
-          onClick={() => onSubmit(config)}
+          onClick={handleSubmit}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
         >

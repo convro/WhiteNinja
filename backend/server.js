@@ -643,6 +643,80 @@ Report any bugs found. If everything passes, give the QA PASS confirmation!`
 // REST ENDPOINTS
 // ============================================================
 
+// ============================================================
+// CONFIG SUGGESTION ENDPOINT
+// ============================================================
+
+app.post('/api/suggest-config', async (req, res) => {
+  try {
+    const { brief } = req.body
+    if (!brief) return res.status(400).json({ error: 'Brief required' })
+
+    const response = await deepseek.chat.completions.create({
+      model: 'deepseek-chat',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a senior web project analyst. Analyze website briefs and return JSON config suggestions. Return ONLY valid JSON with no markdown fences or extra text.',
+        },
+        {
+          role: 'user',
+          content: `Analyze this website brief and return a JSON config object.
+
+BRIEF: "${brief}"
+
+Return JSON with this exact structure:
+{
+  "suggestedConfig": {
+    "siteType": "landing|portfolio|blog|ecommerce|dashboard|custom",
+    "stylePreset": "modern-dark|clean-minimal|bold-colorful|corporate|retro",
+    "primaryColor": "#hexcolor",
+    "animations": true|false,
+    "darkMode": true|false,
+    "responsive": true|false,
+    "includeImages": true|false,
+    "codeQuality": "speed|balanced|perfectionist"
+  },
+  "reasoning": "One sentence explaining your config choices based on the brief.",
+  "customQuestions": [
+    {
+      "id": "unique_snake_case_id",
+      "label": "Short question label (max 4 words)",
+      "description": "Why this choice matters for this specific project",
+      "icon": "one of: Palette, Layout, Target, Users, Zap, Package, Globe, Star, Layers, Type",
+      "configKey": "camelCaseKey",
+      "options": [
+        { "value": "val1", "label": "Label 1", "emoji": "emoji", "desc": "short benefit" },
+        { "value": "val2", "label": "Label 2", "emoji": "emoji", "desc": "short benefit" },
+        { "value": "val3", "label": "Label 3", "emoji": "emoji", "desc": "short benefit" }
+      ],
+      "defaultValue": "val1"
+    }
+  ]
+}
+
+Rules:
+- customQuestions: generate exactly 3 questions that are SPECIFIC and UNIQUE to this brief. Not generic. If the brief mentions a luxury brand, ask about pricing display style. If it mentions e-commerce, ask about cart behavior. If it mentions a portfolio, ask about project showcase layout. Make them relevant.
+- Each question must have exactly 3 options.
+- primaryColor: pick a hex color that fits the visual vibe described in the brief.
+- Be opinionated — pre-select the most sensible defaults.
+- Do not add generic questions like "What framework?" or "Mobile or desktop?".`,
+        },
+      ],
+      max_tokens: 2000,
+    })
+
+    const text = response.choices[0]?.message?.content || ''
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error('No JSON in response')
+    const suggestions = JSON.parse(jsonMatch[0])
+    res.json(suggestions)
+  } catch (err) {
+    console.error('[SuggestConfig]', err.message)
+    res.json({ suggestedConfig: {}, reasoning: '', customQuestions: [] })
+  }
+})
+
 app.post('/api/download', async (req, res) => {
   try {
     const { files } = req.body

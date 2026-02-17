@@ -11,7 +11,7 @@ const EXAMPLES = [
   "A restaurant website with hero image, menu sections, gallery, booking form, and location map",
 ]
 
-export default function BriefScreen({ onSubmit, onBack }) {
+export default function BriefScreen({ onSubmit, onBack, isAnalyzing = false }) {
   const [brief, setBrief] = useState('')
   const [charCount, setCharCount] = useState(0)
 
@@ -30,6 +30,20 @@ export default function BriefScreen({ onSubmit, onBack }) {
   return (
     <div className="brief-screen">
       <div className="brief-orb brief-orb--accent" />
+
+      {isAnalyzing && (
+        <motion.div
+          className="brief-analyzing"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+        >
+          <div className="brief-analyzing-inner">
+            <div className="brief-analyzing-spinner" />
+            <div className="brief-analyzing-text">Analyzing your brief</div>
+            <div className="brief-analyzing-sub">AI is reading your project and generating tailored options...</div>
+          </div>
+        </motion.div>
+      )}
 
       <motion.div
         className="brief-container"
@@ -97,11 +111,11 @@ export default function BriefScreen({ onSubmit, onBack }) {
           <motion.button
             className="btn btn-primary brief-submit"
             onClick={() => onSubmit(brief.trim())}
-            disabled={!canSubmit}
-            whileHover={canSubmit ? { scale: 1.02 } : {}}
-            whileTap={canSubmit ? { scale: 0.98 } : {}}
+            disabled={!canSubmit || isAnalyzing}
+            whileHover={canSubmit && !isAnalyzing ? { scale: 1.02 } : {}}
+            whileTap={canSubmit && !isAnalyzing ? { scale: 0.98 } : {}}
           >
-            Configure Agents
+            {isAnalyzing ? 'Analyzing...' : 'Configure Agents'}
             <ArrowRight size={16} />
           </motion.button>
         </div>

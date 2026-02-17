@@ -354,3 +354,192 @@
   padding: 14px 24px;
   justify-content: center;
 }
+
+/* AI Badge */
+.config-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: var(--radius-full);
+  padding: 2px 6px;
+  text-transform: uppercase;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* AI Tag in section header */
+.config-ai-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Suggested state on buttons */
+.config-type-btn.suggested {
+  border-color: rgba(59, 130, 246, 0.2);
+}
+.config-preset-btn.suggested {
+  border-color: rgba(59, 130, 246, 0.2);
+}
+.config-quality-btn.suggested {
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+/* AI section highlight */
+.config-section--ai {
+  border-color: rgba(59, 130, 246, 0.15);
+  background: rgba(59, 130, 246, 0.03);
+}
+.config-section--ai .config-section-header svg {
+  color: var(--accent);
+}
+
+/* Title sparkle icon */
+.config-title-sparkle {
+  display: inline;
+  vertical-align: middle;
+  color: var(--accent);
+  margin-right: 4px;
+}
+
+/* Custom questions */
+.config-custom-questions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.config-custom-question {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.config-custom-question-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.config-custom-question-header svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.config-custom-question-desc {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  padding-left: 21px;
+}
+
+.config-custom-opts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.config-custom-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  background: var(--bg-elevated);
+  border: var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+.config-custom-opt:hover {
+  background: var(--bg-hover);
+}
+.config-custom-opt.active {
+  background: var(--accent-dim);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.config-custom-opt-emoji {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.config-custom-opt-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.config-custom-opt-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.config-custom-opt.active .config-custom-opt-label {
+  color: var(--accent);
+}
+
+.config-custom-opt-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+/* Analyzing overlay on BriefScreen */
+.brief-analyzing {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.brief-analyzing-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+  text-align: center;
+}
+
+.brief-analyzing-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 3px solid rgba(59, 130, 246, 0.15);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.brief-analyzing-text {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.brief-analyzing-sub {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  max-width: 260px;
+  line-height: 1.5;
+}

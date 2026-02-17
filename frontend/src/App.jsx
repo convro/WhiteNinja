@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import WelcomeScreen from './screens/WelcomeScreen.jsx'
 import BriefScreen from './screens/BriefScreen.jsx'
@@ -48,14 +48,34 @@ export default function App() {
   const [brief, setBrief] = useState('')
   const [config, setConfig] = useState(DEFAULT_CONFIG)
   const [buildResult, setBuildResult] = useState(null)
+  const [configSuggestions, setConfigSuggestions] = useState(null)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   const goToPhase = useCallback((nextPhase) => {
     setPhase(nextPhase)
   }, [])
 
-  const handleBriefSubmit = useCallback((briefText) => {
+  const handleBriefSubmit = useCallback(async (briefText) => {
     setBrief(briefText)
-    setPhase(PHASES.CONFIG)
+    setIsAnalyzing(true)
+    try {
+      const res = await fetch('http://localhost:3001/api/suggest-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brief: briefText }),
+      })
+      const suggestions = await res.json()
+      setConfigSuggestions(suggestions)
+      if (suggestions.suggestedConfig) {
+        setConfig(prev => ({ ...prev, ...suggestions.suggestedConfig }))
+      }
+    } catch (err) {
+      console.error('Config suggestion failed:', err)
+      setConfigSuggestions(null)
+    } finally {
+      setIsAnalyzing(false)
+      setPhase(PHASES.CONFIG)
+    }
   }, [])
 
   const handleConfigSubmit = useCallback((cfg) => {
@@ -72,6 +92,8 @@ export default function App() {
     setBrief('')
     setConfig(DEFAULT_CONFIG)
     setBuildResult(null)
+    setConfigSuggestions(null)
+    setIsAnalyzing(false)
     setPhase(PHASES.WELCOME)
   }, [])
 
@@ -106,7 +128,8 @@ export default function App() {
           >
             <BriefScreen
               onSubmit={handleBriefSubmit}
-              onBack={() => goToPhase(PHASES.WELCOME)}
+              onBack={() => goToPhase(PHASES.BRIEF)}
+              isAnalyzing={isAnalyzing}
             />
           </motion.div>
         )}
@@ -124,6 +147,7 @@ export default function App() {
             <ConfigScreen
               brief={brief}
               config={config}
+              suggestions={configSuggestions}
               onSubmit={handleConfigSubmit}
               onBack={() => goToPhase(PHASES.BRIEF)}
             />
