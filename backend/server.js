@@ -271,14 +271,25 @@ Remember to use the output formats in your system prompt. Write complete, workin
 
   try {
     const response = await deepseek.chat.completions.create({
-      model: 'deepseek-chat',
+      model: 'deepseek-reasoner',
       messages,
       max_tokens: 8000,
-      temperature: 0.7,
       stream: false,
+      // Note: deepseek-reasoner does not support temperature parameter
     })
 
-    return response.choices[0]?.message?.content || ''
+    const choice = response.choices[0]?.message
+
+    // R1 returns reasoning_content (chain-of-thought) — stream it as thinking events
+    if (choice?.reasoning_content) {
+      // Send reasoning as thinking in chunks (split by sentences for UX)
+      const reasoning = choice.reasoning_content.trim()
+      if (reasoning && session.ws.readyState === WebSocket.OPEN) {
+        session.sendThinking(agent.id, reasoning.slice(0, 600) + (reasoning.length > 600 ? '...' : ''))
+      }
+    }
+
+    return choice?.content || ''
   } catch (err) {
     console.error(`[Agent:${agent.id}] API Error:`, err.message)
     return null
