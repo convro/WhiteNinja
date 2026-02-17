@@ -1,0 +1,155 @@
+.brief-screen {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow-y: auto;
+  padding: var(--space-8) var(--space-6);
+}
+
+.brief-orb--accent {
+  position: fixed;
+  width: 500px;
+  height: 500px;
+  background: var(--accent);
+  border-radius: 50%;
+  filter: blur(100px);
+  opacity: 0.07;
+  top: -150px;
+  right: -100px;
+  pointer-events: none;
+}
+
+.brief-container {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.brief-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brief-step {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brief-title h2 {
+  font-size: 1.8rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin-bottom: var(--space-2);
+}
+
+.brief-title p {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.brief-input-wrap {
+  position: relative;
+}
+
+.brief-textarea {
+  font-size: 15px;
+  line-height: 1.7;
+  min-height: 160px;
+  padding: var(--space-5);
+  border-radius: var(--radius-lg);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.brief-textarea:focus {
+  border-color: rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.08);
+}
+
+.brief-char-count {
+  position: absolute;
+  bottom: var(--space-3);
+  right: var(--space-3);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  pointer-events: none;
+}
+
+.brief-examples {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.brief-examples-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.brief-examples-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.brief-example-btn {
+  background: var(--bg-card);
+  border: var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.brief-example-btn svg {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.brief-example-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.brief-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.brief-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  flex: 1;
+}
+
+.brief-submit {
+  flex-shrink: 0;
+  font-size: 15px;
+  padding: 12px 24px;
+}

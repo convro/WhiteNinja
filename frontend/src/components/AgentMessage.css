@@ -1,0 +1,214 @@
+.agent-msg {
+  background: var(--bg-card);
+  border: var(--border-subtle);
+  border-left: 3px solid var(--agent-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  transition: background var(--transition-fast);
+}
+
+.agent-msg:hover { background: var(--bg-hover); }
+
+.agent-msg--thinking {
+  background: color-mix(in srgb, var(--agent-color) 5%, var(--bg-card));
+  border-style: dashed;
+  opacity: 0.9;
+}
+
+.agent-msg--conflict {
+  border-color: var(--warning);
+  background: var(--warning-dim);
+}
+
+.agent-msg-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.agent-msg-name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.agent-msg-to {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.agent-msg-target {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.agent-msg-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: var(--radius-full);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.06);
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+
+.agent-msg-type--file_created { background: var(--success-dim); color: var(--success); }
+.agent-msg-type--file_modified { background: var(--accent-dim); color: var(--accent); }
+.agent-msg-type--file_deleted { background: var(--error-dim); color: var(--error); }
+.agent-msg-type--agent_conflict { background: var(--warning-dim); color: var(--warning); }
+.agent-msg-type--bug_report { background: var(--error-dim); color: var(--error); }
+.agent-msg-type--review_comment { background: var(--purple-dim); color: var(--purple); }
+.agent-msg-type--build_complete { background: var(--success-dim); color: var(--success); }
+
+.agent-msg-time {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+}
+
+/* Thinking */
+.agent-msg-thinking {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.agent-msg-thinking-dots {
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+
+/* Bubble */
+.agent-msg-bubble {
+  background: color-mix(in srgb, var(--agent-color) 8%, var(--bg-elevated));
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+}
+
+.agent-msg-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* File ops */
+.agent-msg-file-op {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.agent-msg-file-path {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.agent-msg-file-op--file_created .agent-msg-file-path { color: var(--success); }
+.agent-msg-file-op--file_modified .agent-msg-file-path { color: var(--accent); }
+.agent-msg-file-op--file_deleted .agent-msg-file-path { color: var(--error); }
+
+.agent-msg-file-path code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.agent-msg-reason {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+  font-style: italic;
+}
+
+.agent-msg-file-preview {
+  margin-top: var(--space-1);
+}
+.agent-msg-file-preview .code-block {
+  font-size: 11px;
+  padding: var(--space-3);
+  max-height: 140px;
+  overflow: auto;
+}
+
+/* Conflict */
+.agent-msg-conflict-about {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--warning);
+  font-weight: 600;
+}
+
+/* Bug */
+.agent-msg-bug {
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-msg-bug--high { background: var(--error-dim); }
+.agent-msg-bug--medium { background: var(--warning-dim); }
+.agent-msg-bug--low { background: rgba(255,255,255,0.04); }
+
+.agent-msg-bug-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--error);
+}
+.agent-msg-bug--medium .agent-msg-bug-header { color: var(--warning); }
+
+.agent-msg-bug-severity {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+/* Review */
+.agent-msg-review {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.agent-msg-review-file {
+  font-size: 11px;
+  color: var(--purple);
+  font-family: var(--font-mono);
+  background: var(--purple-dim);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+
+/* Complete */
+.agent-msg-complete {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--success);
+}
+
+/* Phase change */
+.agent-msg-phase {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+.agent-msg-phase-from { color: var(--text-tertiary); }
+.agent-msg-phase-to { color: var(--accent); }
