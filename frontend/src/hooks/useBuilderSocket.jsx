@@ -6,7 +6,8 @@ export function useBuilderSocket() {
   const wsRef = useRef(null)
   const handlersRef = useRef({})
   const reconnectTimeoutRef = useRef(null)
-  const [connectionState, setConnectionState] = useState('disconnected') // connecting | connected | disconnected | error
+  const reconnectAttemptsRef = useRef(0)
+  const [connectionState, setConnectionState] = useState('disconnected')
 
   const emit = useCallback((type, data = {}) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -22,18 +23,24 @@ export function useBuilderSocket() {
   }, [])
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) return
+    // Don't reconnect if already open OR still connecting
+    if (wsRef.current &&
+      (wsRef.current.readyState === WebSocket.OPEN ||
+       wsRef.current.readyState === WebSocket.CONNECTING)) return
+
+    // Clear any pending reconnect timer
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = null
+    }
 
     setConnectionState('connecting')
     const ws = new WebSocket(WS_URL)
     wsRef.current = ws
 
     ws.onopen = () => {
+      reconnectAttemptsRef.current = 0
       setConnectionState('connected')
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = null
-      }
     }
 
     ws.onmessage = (event) => {
@@ -41,7 +48,6 @@ export function useBuilderSocket() {
         const message = JSON.parse(event.data)
         const handler = handlersRef.current[message.type]
         if (handler) handler(message)
-        // Also call wildcard handler
         const wildcard = handlersRef.current['*']
         if (wildcard) wildcard(message)
       } catch (err) {
@@ -54,22 +60,28 @@ export function useBuilderSocket() {
     }
 
     ws.onclose = () => {
+      if (wsRef.current === ws) {
+        wsRef.current = null
+      }
       setConnectionState('disconnected')
-      wsRef.current = null
-      // Auto-reconnect after 3s
+      // Exponential backoff: 2s, 4s, 8s, max 16s
+      const attempts = reconnectAttemptsRef.current
+      const delay = Math.min(2000 * Math.pow(2, attempts), 16000)
+      reconnectAttemptsRef.current = attempts + 1
       reconnectTimeoutRef.current = setTimeout(() => {
         connect()
-      }, 3000)
+      }, delay)
     }
   }, [])
 
   const disconnect = useCallback(() => {
+    reconnectAttemptsRef.current = 0
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
     }
     if (wsRef.current) {
-      wsRef.current.onclose = null // Prevent auto-reconnect
+      wsRef.current.onclose = null // prevent auto-reconnect
       wsRef.current.close()
       wsRef.current = null
     }

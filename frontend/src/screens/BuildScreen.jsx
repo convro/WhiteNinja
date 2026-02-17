@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
 import { Send, Pause, Play, Home, Wifi, WifiOff } from 'lucide-react'
 import { useBuilderSocket } from '../hooks/useBuilderSocket.jsx'
@@ -9,6 +9,73 @@ import FileTree from '../components/FileTree.jsx'
 import LivePreview from '../components/LivePreview.jsx'
 import BuildProgress from '../components/BuildProgress.jsx'
 import './BuildScreen.css'
+
+const AGENT_META = {
+  architect:      { name: 'Kuba', emoji: '🏗️', color: '#3b82f6' },
+  'frontend-dev': { name: 'Maja', emoji: '⚡',  color: '#22c55e' },
+  stylist:        { name: 'Leo',  emoji: '🎨', color: '#a855f7' },
+  reviewer:       { name: 'Nova', emoji: '🔍', color: '#ef4444' },
+  'qa-tester':    { name: 'Rex',  emoji: '🧪', color: '#eab308' },
+  user:           { name: 'You',  emoji: '💬', color: '#64748b' },
+}
+
+function formatActivityLine(msg) {
+  const meta = AGENT_META[msg.agentId] || { name: msg.agentId || 'System', emoji: '•', color: '#64748b' }
+  switch (msg.type) {
+    case 'agent_thinking':
+      return { meta, text: (msg.thought || '').slice(0, 72) }
+    case 'agent_message':
+      return { meta, text: (msg.message || '').slice(0, 72) }
+    case 'file_created':
+      return { meta, text: `created ${msg.path}` }
+    case 'file_modified':
+      return { meta, text: `updated ${msg.path}` }
+    case 'review_comment':
+      return { meta, text: `reviewed ${msg.file || 'file'}` }
+    case 'bug_report':
+      return { meta, text: `[${msg.severity}] ${(msg.description || '').slice(0, 55)}` }
+    case 'build_complete':
+      return { meta: { ...meta, emoji: '✅', name: 'Team' }, text: 'Build complete! All agents signed off.' }
+    default:
+      return null
+  }
+}
+
+function ActivityLog({ messages }) {
+  const relevant = messages
+    .filter(m => ['agent_thinking','agent_message','file_created','file_modified','review_comment','bug_report','build_complete'].includes(m.type))
+    .slice(-5)
+
+  if (relevant.length === 0) return null
+
+  return (
+    <div className="build-activity-log">
+      <div className="build-activity-log-label">Live activity</div>
+      <AnimatePresence initial={false} mode="popLayout">
+        {relevant.map((msg) => {
+          const line = formatActivityLine(msg)
+          if (!line) return null
+          return (
+            <motion.div
+              key={msg.id}
+              className="build-activity-chip"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <span className="build-activity-dot" style={{ background: line.meta.color }} />
+              <span className="build-activity-agent" style={{ color: line.meta.color }}>
+                {line.meta.emoji} {line.meta.name}
+              </span>
+              <span className="build-activity-text">{line.text}</span>
+            </motion.div>
+          )
+        })}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 export default function BuildScreen({ brief, config, onComplete, onStartOver }) {
   const socket = useBuilderSocket()
@@ -21,7 +88,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
   const [buildProgress, setBuildProgress] = useState(0)
   const [isPaused, setIsPaused] = useState(false)
   const [feedback, setFeedback] = useState('')
-  const [activePanel, setActivePanel] = useState('feed') // mobile tabs
+  const [activePanel, setActivePanel] = useState('feed')
   const [buildStarted, setBuildStarted] = useState(false)
 
   const msgIdRef = useRef(0)
@@ -29,7 +96,6 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
     setMessages(prev => [...prev, { ...msg, id: ++msgIdRef.current, timestamp: msg.timestamp || Date.now() }])
   }, [])
 
-  // Set up WebSocket handlers
   useEffect(() => {
     const offs = [
       socket.on('agent_thinking', (msg) => addMsg(msg)),
@@ -63,6 +129,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
       socket.on('phase_change', (msg) => {
         addMsg(msg)
         setBuildPhase(msg.to)
+        toast(`Phase: ${msg.to}`, { duration: 2000 })
       }),
 
       socket.on('build_progress', (msg) => {
@@ -85,7 +152,6 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
     return () => offs.forEach(off => off && off())
   }, [socket, fs, addMsg, onComplete])
 
-  // Start build when connected
   useEffect(() => {
     if (socket.connectionState === 'connected' && !buildStarted) {
       setBuildStarted(true)
@@ -96,11 +162,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
   const handleSendFeedback = useCallback(() => {
     if (!feedback.trim()) return
     socket.sendFeedback(feedback.trim())
-    addMsg({
-      type: 'agent_message',
-      agentId: 'user',
-      message: feedback.trim(),
-    })
+    addMsg({ type: 'agent_message', agentId: 'user', message: feedback.trim() })
     setFeedback('')
     toast.success('Feedback sent to agents')
   }, [feedback, socket, addMsg])
@@ -128,9 +190,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
       {/* Top Bar */}
       <div className="build-topbar">
         <div className="build-topbar-left">
-          <div className="build-logo">
-            <span>WN</span>
-          </div>
+          <div className="build-logo"><span>WN</span></div>
           <div className="build-brief-summary">
             <span className="build-brief-text">{brief.slice(0, 60)}{brief.length > 60 ? '...' : ''}</span>
             <span className={`build-conn-indicator ${socket.connectionState}`}>
@@ -182,7 +242,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
           />
         </div>
 
-        {/* Center: Agent Feed */}
+        {/* Center: Agent Feed + Feedback */}
         <div className={`build-panel build-panel--feed ${activePanel === 'feed' ? 'mobile-active' : ''}`}>
           <AgentFeed
             messages={messages}
@@ -190,8 +250,6 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
             onResolveConflict={handleResolveConflict}
             phase={buildPhase}
           />
-
-          {/* Feedback input */}
           <div className="build-feedback">
             <input
               className="input build-feedback-input"
@@ -218,6 +276,9 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
             files={fs.files}
           />
         </div>
+
+        {/* Floating realtime activity log — bottom-left */}
+        <ActivityLog messages={messages} />
       </div>
     </div>
   )

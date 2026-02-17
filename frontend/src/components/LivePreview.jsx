@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
-import { Monitor, Tablet, Smartphone, Code2, RefreshCw } from 'lucide-react'
+import { Monitor, Tablet, Smartphone, Code2, RefreshCw, Eye } from 'lucide-react'
 import './LivePreview.css'
 
 const VIEWPORTS = [
-  { id: 'desktop', icon: Monitor, label: 'Desktop', width: '100%' },
-  { id: 'tablet', icon: Tablet, label: 'Tablet', width: '768px' },
-  { id: 'mobile', icon: Smartphone, label: 'Mobile', width: '390px' },
+  { id: 'desktop', icon: Monitor, label: 'Desktop', width: '100%', px: null },
+  { id: 'tablet', icon: Tablet, label: 'Tablet', width: '768px', px: 768 },
+  { id: 'mobile', icon: Smartphone, label: 'Mobile', width: '390px', px: 390 },
 ]
 
 export default function LivePreview({ previewHtml, selectedFile, files }) {
@@ -15,8 +15,23 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
   const iframeRef = useRef(null)
 
   const currentViewport = VIEWPORTS.find(v => v.id === viewport)
-
   const codeContent = selectedFile && files.get(selectedFile)?.content
+
+  // Auto-switch to code view when a file is selected from the tree
+  useEffect(() => {
+    if (selectedFile) {
+      setShowCode(true)
+    }
+  }, [selectedFile])
+
+  const handleViewportClick = (vpId) => {
+    setViewport(vpId)
+    setShowCode(false)
+  }
+
+  const handleCodeToggle = () => {
+    setShowCode(prev => !prev)
+  }
 
   return (
     <div className="live-preview">
@@ -25,8 +40,8 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
           {VIEWPORTS.map(vp => (
             <button
               key={vp.id}
-              className={`live-preview-vp-btn ${viewport === vp.id ? 'active' : ''} ${showCode ? 'disabled' : ''}`}
-              onClick={() => { setViewport(vp.id); setShowCode(false) }}
+              className={`live-preview-vp-btn ${viewport === vp.id && !showCode ? 'active' : ''}`}
+              onClick={() => handleViewportClick(vp.id)}
               title={vp.label}
             >
               <vp.icon size={14} />
@@ -34,18 +49,29 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
           ))}
         </div>
 
+        {!showCode && currentViewport.px && (
+          <div className="live-preview-vp-label">
+            {currentViewport.px}px — {currentViewport.label}
+          </div>
+        )}
+        {showCode && selectedFile && (
+          <div className="live-preview-vp-label live-preview-vp-label--code">
+            {selectedFile}
+          </div>
+        )}
+
         <div className="live-preview-actions">
           <button
             className={`live-preview-vp-btn ${showCode ? 'active' : ''}`}
-            onClick={() => setShowCode(!showCode)}
-            title="Toggle code view"
+            onClick={handleCodeToggle}
+            title={showCode ? 'Show preview' : 'View code'}
           >
-            <Code2 size={14} />
+            {showCode ? <Eye size={14} /> : <Code2 size={14} />}
           </button>
           <button
             className="live-preview-vp-btn"
             onClick={() => setRefreshKey(k => k + 1)}
-            title="Refresh"
+            title="Refresh preview"
           >
             <RefreshCw size={14} />
           </button>
@@ -60,6 +86,9 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
                 <div className="live-preview-code-path">
                   <Code2 size={12} />
                   <span>{selectedFile}</span>
+                  <span className="live-preview-code-lines">
+                    {codeContent ? codeContent.split('\n').length + ' lines' : ''}
+                  </span>
                 </div>
                 <pre className="live-preview-code-block">
                   <code>{codeContent || '// Empty file'}</code>
@@ -75,8 +104,8 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
         ) : (
           <div className="live-preview-iframe-wrap">
             <div
-              className="live-preview-iframe-container"
-              style={{ maxWidth: currentViewport.width }}
+              className={`live-preview-iframe-container viewport-${viewport}`}
+              style={currentViewport.px ? { width: currentViewport.width } : {}}
             >
               {previewHtml ? (
                 <iframe
@@ -90,8 +119,8 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
               ) : (
                 <div className="live-preview-placeholder">
                   <div className="live-preview-placeholder-grid">
-                    <div className="pp-hero" />
                     <div className="pp-nav" />
+                    <div className="pp-hero" />
                     <div className="pp-section">
                       <div className="pp-card" />
                       <div className="pp-card" />

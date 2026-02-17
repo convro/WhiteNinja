@@ -407,23 +407,43 @@ async function runBuild(session) {
   session.sendPhaseChange('PLANNING')
   session.setProgress(5, 'Starting planning phase')
 
-  session.sendThinking('architect', 'Analyzing the user brief. Let me think about the best structure for this website...')
+  session.sendThinking('architect', `Reading the brief carefully: "${session.brief.slice(0, 120)}..." — determining file structure, sections, and design direction.`)
 
   const planResponse = await callAgent(
     session,
     architect,
-    `Analyze this brief and create a detailed project plan. Create the initial HTML structure file. Think step by step about:
-1. What sections does this website need?
-2. What JavaScript interactions are required?
-3. What's the file structure?
-4. What design direction (color, style) fits this brief?
+    `You are starting a new website project. Analyze this brief deeply and build the foundation.
 
-Base template hint: ${template.description}
-Suggested files: ${template.files.join(', ')}
+USER BRIEF: "${session.brief}"
+
+CONFIGURATION:
+- Site type: ${config?.siteType || 'landing'}
+- Style preset: ${config?.stylePreset || 'modern-dark'}
+- Primary color: ${config?.primaryColor || '#3b82f6'}
+- Dark mode site: ${config?.darkMode ? 'YES — build dark themed' : 'no'}
+- Animations: ${config?.animations ? 'YES — include them' : 'keep minimal'}
+- Responsive: ${config?.responsive ? 'YES — mobile-first' : 'desktop only'}
+- Code quality: ${config?.codeQuality || 'balanced'}
+
+STEP 1 — THINK through the architecture:
+- What are the exact named sections this specific website needs? (e.g. HeroSection, PricingCards, TestimonialSlider)
+- What JavaScript interactions are needed? (forms, modals, scroll effects, etc.)
+- What unique visual elements does this brief require?
+
+STEP 2 — Create index.html with REAL content:
+- Write ALL the actual text content, headings, copy (don't use Lorem ipsum)
+- Include all sections from the brief with proper HTML5 semantics
+- Add descriptive class names that Leo can style (e.g. .hero__cta, .pricing-card--featured)
+- Link to css/styles.css and js/main.js
+
+STEP 3 — Brief the team:
+- MESSAGE @maja with specific JS tasks she needs to implement (list them by section)
+- MESSAGE @leo with the design direction, color palette intent, and which sections need special attention
+
+Base template: ${template.description}
 Suggested sections: ${template.sections.join(', ')}
 
-After planning, create the main index.html with the full HTML structure (real content, not placeholders).
-Also MESSAGE @maja and @leo with their tasks.`
+Write complete, production-ready HTML with meaningful content from the brief.`
   )
 
   if (session.aborted) return
@@ -450,17 +470,22 @@ Also MESSAGE @maja and @leo with their tasks.`
   const scaffoldResponse = await callAgent(
     session,
     frontendDev,
-    `Kuba (Architect) has created the initial structure. Now:
-1. Review what Kuba built in index.html
-2. Create the main CSS file (css/styles.css) with the base design system, CSS variables, and styles for all sections Kuba defined
-3. Create js/main.js with JavaScript for interactivity
-4. Make sure everything works together
+    `Kuba just finished the HTML structure. Your turn, Maja.
 
-The style should be: ${config?.stylePreset || 'modern-dark'}.
-Primary color: ${config?.primaryColor || '#3b82f6'}.
-${config?.darkMode ? 'Build a dark-themed site.' : ''}
-${config?.animations ? 'Include smooth CSS transitions and hover animations.' : ''}
-${config?.responsive ? 'Make it mobile-responsive.' : ''}`
+Your tasks:
+1. READ index.html carefully — understand every section and class name Kuba used
+2. Create js/main.js with JavaScript for ALL interactive elements. This must include:
+   - Mobile navigation toggle (hamburger menu)
+   - Smooth scroll behavior for anchor links
+   - Any form validation mentioned in the brief
+   - Scroll-triggered animations if animations are enabled (${config?.animations ? 'YES, add them' : 'no'})
+   - Any specific interactions the brief mentions
+3. MESSAGE @leo telling him EXACTLY what class names you and Kuba used in the HTML, so he can write CSS that targets them correctly. List every major section class.
+4. MESSAGE @nova to confirm you've got the HTML structure documented for review
+
+After finishing, MESSAGE @kuba confirming what you built and any structural concerns.
+
+The brief: "${session.brief.slice(0, 200)}"`
   )
 
   if (session.aborted) return
@@ -474,20 +499,45 @@ ${config?.responsive ? 'Make it mobile-responsive.' : ''}`
   session.setProgress(35, 'Frontend dev coding')
 
   // Leo styles in parallel with Maja coding
-  session.sendThinking('stylist', "Let me check what Maja has written so I can apply proper styling. First impression... interesting structure, but that color scheme needs work.")
+  session.sendThinking('stylist', `Kuba and Maja have finished the structure. Time to make this look incredible. Brief says: "${session.brief.slice(0, 100)}..." — I can already see the visual direction.`)
 
   const stylistResponse = await callAgent(
     session,
     stylist,
-    `Review Maja's HTML structure and COMPLETELY REWRITE css/styles.css with:
-1. A complete, beautiful design system (CSS variables for all tokens)
-2. Professional styling for every section in the HTML
-3. Smooth animations and hover effects (${config?.animations ? 'yes, add them' : 'keep minimal'})
-4. ${config?.responsive ? 'Mobile-first responsive design' : 'Desktop-optimized layout'}
-5. Style preset: ${config?.stylePreset || 'modern-dark'}
-6. Primary brand color: ${config?.primaryColor || '#3b82f6'}
+    `Maja and Kuba have built the HTML structure. Now it's your turn to make it look stunning.
 
-Make it look premium and polished. Don't be shy about opinionated design choices.`
+READ all existing files carefully, especially every class name and section in index.html.
+
+Create css/styles.css with a COMPLETE, professional design system:
+
+1. CSS VARIABLES (design tokens):
+   - Color palette: primary ${config?.primaryColor || '#3b82f6'}, backgrounds, surfaces, text colors
+   - Typography scale: font sizes, weights, line heights
+   - Spacing system: consistent gap/padding values
+   - Border radius, shadows, transitions
+
+2. GLOBAL STYLES:
+   - CSS reset/normalize
+   - Body, typography defaults
+   - Link, button base styles
+
+3. SECTION STYLES — style EVERY section from the HTML:
+   - Hero section (always the most important — make it breathtaking)
+   - Navigation (sticky, with mobile hamburger states)
+   - All other sections from the brief
+   - Footer
+
+4. DESIGN DIRECTION:
+   - Preset: ${config?.stylePreset || 'modern-dark'}
+   - ${config?.darkMode ? 'DARK THEME — use dark backgrounds, light text, glows' : 'LIGHT THEME — clean, airy'}
+   - Primary brand color: ${config?.primaryColor || '#3b82f6'}
+   - ${config?.animations ? 'Add CSS animations: fade-in on scroll (use .is-visible class), hover transforms, smooth transitions' : 'Keep animations minimal'}
+   - ${config?.responsive ? 'MOBILE FIRST: start with mobile, add breakpoints at 768px and 1200px' : 'Desktop-optimized'}
+
+5. After styling, MESSAGE @maja listing any class names you expect from the JS (like .nav--open, .is-visible) so she can add them in js/main.js
+6. MESSAGE @nova that CSS is ready for review
+
+Make it look like a premium agency built this. Be opinionated and bold.`
   )
 
   if (session.aborted) return
@@ -515,18 +565,45 @@ Update the relevant files to address this feedback. Be specific about what you'r
   session.sendPhaseChange('REVIEWING')
   session.setProgress(60, 'Code review in progress')
 
-  session.sendThinking('reviewer', "Alright, let me go through all this code carefully. I already spotted something on line 23...")
+  session.sendThinking('reviewer', "Alright team — my turn. I'm going through every file with a fine-tooth comb. Let me start with the HTML structure, then CSS, then JS...")
 
   const reviewResponse = await callAgent(
     session,
     reviewer,
-    `Do a thorough code review of ALL files. Check for:
-1. HTML: semantic correctness, missing meta tags, accessibility (alt text, ARIA), broken structure
-2. CSS: unused rules, missing responsive breakpoints, specificity issues
-3. JavaScript: null checks, error handling, console.log left in, event listeners
-4. Overall: does it match the user's brief? Are all promised sections present?
+    `You are doing a thorough code review of the complete website. Read every file carefully.
 
-Report specific issues with file name and line numbers. Also identify 2-3 things that are actually well done.`
+USER'S BRIEF (what they wanted): "${session.brief.slice(0, 300)}"
+
+Your review must cover:
+
+1. BRIEF COMPLIANCE — Does the website actually deliver what was promised?
+   - List each requirement from the brief and whether it's implemented
+   - Flag any missing sections or features
+
+2. HTML REVIEW (index.html):
+   - Semantic HTML5 correctness
+   - Missing/incorrect meta tags (title, description, og:tags)
+   - Accessibility issues (missing alt text, ARIA labels, form labels, skip links)
+   - Logical heading hierarchy (h1 → h2 → h3)
+
+3. CSS REVIEW (css/styles.css):
+   - Missing responsive breakpoints or broken layouts at 375px/768px/1440px
+   - Hardcoded values that should be CSS variables
+   - Missing hover/focus states on interactive elements
+   - Color contrast issues
+
+4. JAVASCRIPT REVIEW (js/main.js):
+   - Unchecked null references (querySelector that might return null)
+   - Missing event listener cleanup
+   - Broken interactive features from the brief
+
+For EACH issue found, write:
+===REVIEW_COMMENT: filename:approximate_line===
+[precise description of the issue and how to fix it]
+===END_REVIEW===
+
+Also write a MESSAGE @maja with the top 3 priority fixes she needs to do immediately.
+Write a MESSAGE @leo with the top 2 CSS improvements needed.`
   )
 
   if (session.aborted) return
@@ -540,34 +617,46 @@ Report specific issues with file name and line numbers. Also identify 2-3 things
   session.setProgress(73, 'Fixing review issues')
 
   if (session.reviewComments.length > 0) {
-    session.sendThinking('frontend-dev', `Nova found ${session.reviewComments.length} issues. On it...`)
+    session.sendThinking('frontend-dev', `Nova flagged ${session.reviewComments.length} issues. Prioritizing them by severity and fixing everything...`)
 
     const fixResponse = await callAgent(
       session,
       frontendDev,
-      `Nova's code review found these issues:
+      `Nova (Code Reviewer) flagged these issues that need fixing:
 ${session.reviewComments.map(c => `- ${c.file}:${c.line || '?'} — ${c.comment}`).join('\n')}
 
-Fix ALL the issues in the relevant files. Show the complete fixed file content for each file you modify.`
+Fix ALL issues. For each file you touch, output the COMPLETE updated file content (not just the changed lines).
+After fixing, MESSAGE @nova confirming what you fixed and flagging anything you couldn't fix.
+MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
     )
 
     if (!session.aborted) parseAgentResponse(session, 'frontend-dev', fixResponse)
+  } else {
+    session.sendThinking('frontend-dev', "Nova's review came back clean — no major issues. Doing a final JS polish pass anyway...")
   }
 
   // Leo does final styling pass
-  session.sendThinking('stylist', "While they fix bugs, let me do a final styling pass. Those hover states need more love...")
+  session.sendThinking('stylist', "Nova pointed out some CSS issues. Also doing my own final aesthetic pass — I want this to look perfect.")
 
   const stylistPolish = await callAgent(
     session,
     stylist,
-    `Do a final CSS polish pass:
-1. Review the current css/styles.css and improve it
-2. Add missing hover states, focus styles, and transitions
-3. Fix any responsive breakpoint issues
-4. Make sure the design is cohesive and premium-looking
-5. Add any final touches that will make it shine
+    `Nova's review flagged some CSS issues. Fix them AND do a final design polish pass.
 
-Update css/styles.css with the polished version.`
+Nova's CSS feedback:
+${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues flagged — focus on polish)'}
+
+Your final polish checklist:
+1. Every interactive element has visible hover AND focus states
+2. Smooth transitions on all state changes (nav, buttons, cards)
+3. ${config?.responsive ? 'Verify mobile breakpoints — hero, nav, and grid all look good at 375px' : 'Fine-tune desktop layout'}
+4. Ensure visual hierarchy: headings, subheadings, body text, captions all have distinct sizes
+5. Add any micro-animations that will delight users (subtle, not distracting)
+6. Check that the primary color ${config?.primaryColor || '#3b82f6'} is used consistently and effectively
+
+After updating, MESSAGE @rex that CSS is polished and ready for QA testing.
+
+Output the complete final css/styles.css.`
   )
 
   if (!session.aborted) parseAgentResponse(session, 'stylist', stylistPolish)
@@ -579,20 +668,51 @@ Update css/styles.css with the polished version.`
   session.sendPhaseChange('TESTING')
   session.setProgress(85, 'QA testing')
 
-  session.sendThinking('qa-tester', "Time to break things! Let me go through the checklist... I have a feeling that mobile nav is gonna be interesting.")
+  session.sendThinking('qa-tester', "Leo said it's ready. Let's see about that. Pulling out my QA checklist... I'm going to test EVERYTHING the brief asked for.")
 
   const qaResponse = await callAgent(
     session,
     qaTester,
-    `Test the complete website. Check:
-1. All sections render correctly and match the brief
-2. HTML structure is valid and semantic
-3. CSS handles all viewport sizes (mobile 375px, tablet 768px, desktop 1440px)
-4. JavaScript interactions work (forms, modals, buttons, etc.)
-5. No broken links, missing images, or console errors
-6. Accessibility: keyboard navigation, screen reader support
+    `You are doing final QA on the complete website build. Be thorough and methodical.
 
-Report any bugs found. If everything passes, give the QA PASS confirmation!`
+ORIGINAL BRIEF (what the user requested): "${session.brief.slice(0, 400)}"
+
+Test everything systematically:
+
+1. FEATURE COVERAGE — go through the brief line by line:
+   - Mark each requested feature as PASS ✅ or FAIL ❌
+   - For fails, write a BUG_REPORT
+
+2. VISUAL RENDERING:
+   - Does the page have proper content (not placeholder text)?
+   - Do all sections look intentional and styled?
+   - Does the hero section make a strong first impression?
+
+3. RESPONSIVE BEHAVIOR:
+   - At 375px (mobile): navigation collapses, content stacks, text is readable
+   - At 768px (tablet): layout adapts correctly
+   - At 1440px (desktop): full layout, nothing overflows
+
+4. INTERACTIONS:
+   - Navigation links work
+   - Buttons have visible states
+   - Any forms have proper validation
+   - JavaScript features from the brief are implemented
+
+5. TECHNICAL QUALITY:
+   - No obvious console errors
+   - No broken/missing assets
+   - Proper HTML semantics (h1 used once, inputs have labels, images have alt)
+
+For each bug found, use:
+===BUG_REPORT: severity=high|medium|low===
+Issue: [exact description]
+File: [filename]
+Fix: [suggested fix]
+===END_BUG===
+
+If overall quality is acceptable, end with a MESSAGE @kuba with your QA verdict and summary.
+If there are critical failures, MESSAGE @maja with specific fixes needed.`
   )
 
   if (session.aborted) return
