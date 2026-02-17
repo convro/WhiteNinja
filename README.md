@@ -1,4 +1,4 @@
-# White Ninja AI
+# White Ninja AI backend port 3006 frontend at 5585
 
 **Multi-Agent Website Builder** — Watch 5 AI agents build your website in real-time.
 
