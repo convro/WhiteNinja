@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 
-const WS_URL = `ws://${window.location.hostname}:3001/ws`
+const WS_URL = `ws://${window.location.host}/ws`
 
 export function useBuilderSocket() {
   const wsRef = useRef(null)
