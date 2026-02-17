@@ -1,0 +1,67 @@
+.agent-avatar-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-avatar-wrap--labeled {
+  gap: 10px;
+}
+
+.agent-avatar {
+  position: relative;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color) 15%, var(--bg-elevated));
+  border: 2px solid color-mix(in srgb, var(--color) 40%, transparent);
+  flex-shrink: 0;
+}
+
+.agent-avatar--sm { width: 28px; height: 28px; }
+.agent-avatar--md { width: 36px; height: 36px; }
+.agent-avatar--lg { width: 48px; height: 48px; }
+.agent-avatar--xl { width: 64px; height: 64px; }
+
+.agent-avatar--sm .agent-avatar-emoji { font-size: 14px; }
+.agent-avatar--md .agent-avatar-emoji { font-size: 18px; }
+.agent-avatar--lg .agent-avatar-emoji { font-size: 24px; }
+.agent-avatar--xl .agent-avatar-emoji { font-size: 32px; }
+
+.agent-avatar-emoji { line-height: 1; }
+
+.agent-avatar-ring {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--color);
+  opacity: 0;
+  animation: avatarPulse 2s ease infinite;
+}
+
+@keyframes avatarPulse {
+  0%, 100% { opacity: 0; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(1.05); }
+}
+
+.agent-avatar-labels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.agent-avatar-name {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.agent-avatar-role {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+  line-height: 1;
+}
