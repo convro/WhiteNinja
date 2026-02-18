@@ -2,11 +2,14 @@ import { motion } from 'framer-motion'
 import './BuildProgress.css'
 
 const MILESTONES = [
-  'PLANNING', 'SCAFFOLDING', 'CODING', 'REVIEWING', 'FIXING', 'TESTING', 'POLISHING', 'COMPLETE'
+  'PLANNING', 'SCAFFOLDING', 'CODING', 'REVIEWING', 'FIXING', 'TESTING', 'BUGFIXING', 'RETESTING', 'POLISHING', 'COMPLETE'
 ]
 
 export default function BuildProgress({ percent = 0, phase, milestone }) {
-  const currentIdx = MILESTONES.indexOf(phase)
+  // Map phase to milestone index — RETESTING/BUGFIXING may repeat,
+  // so find latest matching index or fall back to phase name
+  let currentIdx = MILESTONES.indexOf(phase)
+  if (currentIdx === -1) currentIdx = 0 // unknown phase, show at start
 
   return (
     <div className="build-progress">
