@@ -580,11 +580,10 @@ async function callAgent(session, agent, userPrompt, additionalContext = '') {
   await rateLimiter.waitForApiSlot(session.id)
 
   const filesContext = session.getAllFiles()
-    .slice(-10)
-    .map(f => `\n--- ${f.path} ---\n${f.content?.slice(0, 2000) || '(empty)'}`)
+    .map(f => `\n--- ${f.path} (${f.content?.split('\n').length || 0} lines) ---\n${f.content || '(empty)'}`)
     .join('\n')
 
-  const recentMsgs = session.getRecentMessages(6)
+  const recentMsgs = session.getRecentMessages(12)
     .map(m => `[${m.agentId || 'system'}]: ${m.message || m.thought || `${m.type} ${m.path || ''}`}`)
     .join('\n')
 
@@ -882,7 +881,16 @@ Write complete, content-rich HTML. Every section should have enough real content
     session.send('phase_skipped', { phase: 'PLANNING', reason: 'Architect agent failed to respond' })
   }
 
-  // Extract plan from response
+  // Extract plan from response — include architect's actual creative decisions
+  // so downstream agents see what Kuba actually planned, not just the template
+  const architectThinking = planResponse
+    ? (planResponse.match(/===THINKING===([\s\S]*?)===END_THINKING===/)?.[1] || '').trim().slice(0, 2000)
+    : ''
+  const architectMessages = planResponse
+    ? [...planResponse.matchAll(/===MESSAGE:\s*@?(\w[\w-]*)===([\s\S]*?)===END_MESSAGE===/g)]
+        .map(m => `@${m[1]}: ${m[2].trim()}`).join('\n')
+    : ''
+
   session.plan = {
     siteType: config?.siteType || 'landing',
     template,
@@ -890,6 +898,8 @@ Write complete, content-rich HTML. Every section should have enough real content
     filesPlanned: template.files,
     sectionsPlanned: template.sections,
     designGuidance: template.designGuidance || '',
+    architectNotes: architectThinking,
+    teamBriefing: architectMessages,
   }
 
   session.setProgress(15, 'Planning complete')
@@ -1009,17 +1019,24 @@ The result should look like a $10,000+ agency project, not a free template.`
   session.setProgress(50, 'Styling applied')
   await sleep(600)
 
-  // Add user feedback if any
+  // Add user feedback if any — pass current file state so Maja sees latest CSS/HTML
   if (session.pendingFeedback.length > 0) {
-    const feedbackCtx = `User feedback received: ${session.pendingFeedback.join('. ')}`
+    const feedbackCtx = session.pendingFeedback.join('. ')
     session.pendingFeedback = []
     session.sendThinking('frontend-dev', `Got user feedback! Implementing changes: ${feedbackCtx}`)
 
+    const currentCss = session.fs.get('css/styles.css')?.content || ''
     const feedbackResponse = await callAgentWithRetry(
       session,
       frontendDev,
       `The user gave us feedback: "${feedbackCtx}".
-Update the relevant files to address this feedback. Be specific about what you're changing and why.`
+
+Read the current files carefully (they include Leo's latest CSS styling).
+Update the relevant files to address this feedback. Output COMPLETE updated files.
+If the feedback requires CSS changes, MESSAGE @leo with specific instructions.
+
+Current CSS reference (Leo's latest):
+${currentCss.slice(0, 3000)}`
     )
     if (!session.aborted && feedbackResponse) {
       parseAgentResponse(session, 'frontend-dev', feedbackResponse)
@@ -1109,13 +1126,24 @@ MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
     session.sendThinking('frontend-dev', "Nova's review came back clean — no major issues. Doing a final JS polish pass anyway...")
   }
 
-  // Leo does final styling pass
+  // Leo does final styling pass — IMPORTANT: pass Maja's latest HTML+JS so Leo sees her fixes
   session.sendThinking('stylist', "Nova pointed out some CSS issues. Also doing my own final aesthetic pass — I want this to look perfect.")
+
+  const latestHtml = session.fs.get('index.html')?.content || ''
+  const latestJs = session.fs.get('js/main.js')?.content || ''
 
   const stylistPolish = await callAgentWithRetry(
     session,
     stylist,
     `Nova reviewed everything. Fix the issues AND do a final design polish.
+
+IMPORTANT: Maja just finished her fixes. Here is the CURRENT state of her files:
+
+--- CURRENT index.html (after Maja's fixes) ---
+${latestHtml.slice(0, 8000)}
+
+--- CURRENT js/main.js (after Maja's fixes) ---
+${latestJs.slice(0, 4000)}
 
 Nova's CSS feedback:
 ${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues — focus on polish)'}
@@ -1143,23 +1171,33 @@ After updating, MESSAGE @rex that design is polished.`
   session.setProgress(82, 'Fixes applied')
   await sleep(500)
 
-  // ── PHASE 6: TESTING ──
-  session.sendPhaseChange('TESTING')
-  session.setProgress(85, 'QA testing')
+  // ── PHASE 6: TESTING + BUGFIX LOOP ──
+  // Rex tests → if bugs found → Maja/Leo fix → Rex re-tests
+  // Max 2 rounds to prevent infinite loops
+  const MAX_QA_ROUNDS = 2
+  let qaRound = 0
+  let hasCriticalBugs = true
 
-  session.sendThinking('qa-tester', "Leo said it's ready. Let's see about that. Pulling out my QA checklist... I'm going to test EVERYTHING the brief asked for.")
+  while (hasCriticalBugs && qaRound < MAX_QA_ROUNDS && !session.aborted) {
+    qaRound++
+    session.sendPhaseChange(qaRound === 1 ? 'TESTING' : 'RETESTING')
+    session.setProgress(qaRound === 1 ? 85 : 90, `QA testing (round ${qaRound})`)
 
-  const qaResponse = await callAgentWithRetry(
-    session,
-    qaTester,
-    `You are doing final QA on the complete website build. Be thorough and methodical.
+    session.sendThinking('qa-tester', qaRound === 1
+      ? "Leo said it's ready. Let's see about that. Pulling out my QA checklist... I'm going to test EVERYTHING."
+      : `Round ${qaRound} — re-testing after Maja and Leo's fixes. Let's see if they nailed it this time...`)
+
+    const qaResponse = await callAgentWithRetry(
+      session,
+      qaTester,
+      `${qaRound > 1 ? `RE-TEST (round ${qaRound}): Maja and Leo applied fixes from your previous bug reports. Check if the issues are resolved AND look for any new problems.\n\n` : ''}You are doing ${qaRound > 1 ? 'a re-test' : 'final QA'} on the complete website build. Be thorough and methodical.
 
 ORIGINAL BRIEF (what the user requested): "${session.brief.slice(0, 400)}"
 
 Test everything systematically:
 
 1. FEATURE COVERAGE — go through the brief line by line:
-   - Mark each requested feature as PASS ✅ or FAIL ❌
+   - Mark each requested feature as PASS or FAIL
    - For fails, write a BUG_REPORT
 
 2. VISUAL RENDERING:
@@ -1173,36 +1211,142 @@ Test everything systematically:
    - At 1440px (desktop): full layout, nothing overflows
 
 4. INTERACTIONS:
-   - Navigation links work
-   - Buttons have visible states
-   - Any forms have proper validation
+   - Navigation links have smooth scroll
+   - Buttons have visible hover/focus states
+   - Any forms have proper validation with inline errors
    - JavaScript features from the brief are implemented
+   - Mobile hamburger menu works (open, close, outside click)
 
 5. TECHNICAL QUALITY:
-   - No obvious console errors
-   - No broken/missing assets
-   - Proper HTML semantics (h1 used once, inputs have labels, images have alt)
+   - No JavaScript syntax errors or null reference errors
+   - No broken CSS (unclosed rules, invalid properties)
+   - Proper HTML semantics (h1 once, inputs have labels, images have alt)
+   - All Lucide icons render correctly (<i data-lucide="...">)
 
 For each bug found, use:
 ===BUG_REPORT: severity=high|medium|low===
 Issue: [exact description]
 File: [filename]
-Fix: [suggested fix]
+Fix: [suggested fix — be specific enough that Maja/Leo can fix without asking]
 ===END_BUG===
 
-If overall quality is acceptable, end with a MESSAGE @kuba with your QA verdict and summary.
-If there are critical failures, MESSAGE @maja with specific fixes needed.`
-  )
+IMPORTANT: If you find NO critical or high-severity bugs, write:
+===MESSAGE: @kuba===
+QA PASS! The site is ready to ship. [summary of quality]
+===END_MESSAGE===
+
+If there ARE critical bugs, write:
+===MESSAGE: @maja===
+[specific fixes needed with file names and line references]
+===END_MESSAGE===
+===MESSAGE: @leo===
+[specific CSS fixes needed]
+===END_MESSAGE===`
+    )
+
+    if (session.aborted) return
+
+    // Count bugs from this QA round
+    let criticalBugCount = 0
+    let totalBugCount = 0
+
+    if (qaResponse) {
+      // Count bugs before parsing (parsing clears them)
+      const bugMatches = [...qaResponse.matchAll(/===BUG_REPORT:\s*severity=(\w+)===/g)]
+      totalBugCount = bugMatches.length
+      criticalBugCount = bugMatches.filter(m => m[1] === 'high' || m[1] === 'critical').length
+
+      parseAgentResponse(session, 'qa-tester', qaResponse)
+
+      logger.info('QA', `Round ${qaRound}: ${totalBugCount} bugs (${criticalBugCount} critical) for session ${session.id.slice(0, 8)}`)
+    } else {
+      logger.warn('Build', `QA phase failed for session ${session.id.slice(0, 8)}, skipping`)
+      session.skippedPhases.push('TESTING')
+      session.send('phase_skipped', { phase: 'TESTING', reason: 'QA tester agent failed to respond' })
+      break
+    }
+
+    // If no critical bugs, we're done
+    if (criticalBugCount === 0) {
+      hasCriticalBugs = false
+      session.sendThinking('qa-tester', totalBugCount === 0
+        ? 'Clean pass! No bugs found. This is ready to ship.'
+        : `Found ${totalBugCount} minor issues but no critical bugs. Good enough to ship.`)
+      break
+    }
+
+    // If critical bugs exist and we haven't hit max rounds, fix them
+    if (qaRound < MAX_QA_ROUNDS) {
+      session.sendPhaseChange('BUGFIXING')
+      session.setProgress(88, `Fixing ${criticalBugCount} critical bugs`)
+
+      session.sendThinking('frontend-dev', `Rex found ${criticalBugCount} critical bugs. Fixing all of them NOW — no excuses.`)
+
+      // Maja fixes HTML + JS bugs
+      const bugfixHtmlJs = session.messages
+        .filter(m => m.type === 'bug_report')
+        .slice(-10)
+        .map(m => `[${m.severity}] ${m.description}`)
+        .join('\n')
+
+      const bugfixResponse = await callAgentWithRetry(
+        session,
+        frontendDev,
+        `Rex (QA Tester) found these bugs that MUST be fixed:
+
+${bugfixHtmlJs}
+
+Fix ALL bugs. Focus on:
+1. JavaScript errors (null references, syntax errors, broken event listeners)
+2. HTML structure issues (missing elements, broken semantics)
+3. Missing interactive features from the brief
+
+Output COMPLETE updated files for every file you change.
+MESSAGE @leo about any CSS-related bugs you can't fix from HTML/JS side.`
+      )
+
+      if (!session.aborted && bugfixResponse) {
+        parseAgentResponse(session, 'frontend-dev', bugfixResponse)
+      }
+
+      // Leo fixes CSS bugs
+      const cssBugs = session.messages
+        .filter(m => m.type === 'bug_report' && (m.description?.includes('CSS') || m.description?.includes('style') || m.description?.includes('responsive') || m.description?.includes('hover') || m.description?.includes('mobile') || m.description?.includes('layout')))
+        .slice(-5)
+        .map(m => `[${m.severity}] ${m.description}`)
+        .join('\n')
+
+      if (cssBugs) {
+        const currentHtmlForBugfix = session.fs.get('index.html')?.content || ''
+        const cssBugfixResponse = await callAgentWithRetry(
+          session,
+          stylist,
+          `Rex found CSS/visual bugs that need fixing:
+
+${cssBugs}
+
+Fix all visual/CSS issues. Check especially:
+1. Missing hover/focus states
+2. Broken responsive layouts at 375px/768px/1440px
+3. Missing animation states (.is-visible, .is-open, .is-scrolled)
+4. Typography hierarchy issues
+
+Current HTML (after Maja's bugfixes):
+${currentHtmlForBugfix.slice(0, 6000)}
+
+Output the COMPLETE updated css/styles.css.`
+        )
+
+        if (!session.aborted && cssBugfixResponse) {
+          parseAgentResponse(session, 'stylist', cssBugfixResponse)
+        }
+      }
+
+      await sleep(400)
+    }
+  }
 
   if (session.aborted) return
-
-  if (qaResponse) {
-    parseAgentResponse(session, 'qa-tester', qaResponse)
-  } else {
-    logger.warn('Build', `QA phase failed for session ${session.id.slice(0, 8)}, skipping`)
-    session.skippedPhases.push('TESTING')
-    session.send('phase_skipped', { phase: 'TESTING', reason: 'QA tester agent failed to respond' })
-  }
 
   session.setProgress(92, 'QA complete')
   await sleep(500)
@@ -1211,24 +1355,36 @@ If there are critical failures, MESSAGE @maja with specific fixes needed.`
   session.sendPhaseChange('POLISHING')
   session.setProgress(95, 'Final polish')
 
-  // Check for more user feedback
+  // Check for more user feedback — pass current state + QA findings
   if (session.pendingFeedback.length > 0) {
     const feedbackCtx = session.pendingFeedback.join('. ')
     session.pendingFeedback = []
 
+    const currentCssForPolish = session.fs.get('css/styles.css')?.content || ''
+    const currentHtmlForPolish = session.fs.get('index.html')?.content || ''
     const lateFixResponse = await callAgentWithRetry(
       session,
       stylist,
-      `Late user feedback: "${feedbackCtx}". Apply any visual/design changes requested. Update the relevant files.`
+      `Late user feedback: "${feedbackCtx}".
+Apply the visual/design changes the user requested. Output the COMPLETE updated css/styles.css.
+
+Current CSS (your latest version):
+${currentCssForPolish.slice(0, 6000)}
+
+Current HTML structure (for reference):
+${currentHtmlForPolish.slice(0, 4000)}`
     )
     if (!session.aborted && lateFixResponse) {
       parseAgentResponse(session, 'stylist', lateFixResponse)
     }
   }
 
+  // Final preview update before completion
+  session.updatePreview()
+
   session.sendMessage('architect', 'Project complete. Final review: all agents have signed off. The build is ready for delivery.', null)
-  session.sendMessage('reviewer', 'Confirmed. Code quality is acceptable. Signing off. 🔍', null)
-  session.sendMessage('qa-tester', 'QA PASS! All tests cleared. Ship it! 🧪', null)
+  session.sendMessage('reviewer', 'Confirmed. Code quality is acceptable. Signing off.', null)
+  session.sendMessage('qa-tester', `QA complete after ${qaRound} round(s). ${hasCriticalBugs ? 'Some issues remain — flagged for user review.' : 'All critical issues resolved. Ship it!'}`, null)
 
   // ── PHASE 8: COMPLETE ──
   session.sendPhaseChange('COMPLETE')
@@ -1241,17 +1397,18 @@ If there are critical failures, MESSAGE @maja with specific fixes needed.`
     : ''
 
   const tokenUsage = tokenTracker.getSessionUsage(session.id)
-  const summary = `Successfully built a ${session.config?.siteType || 'landing'} page with ${session.fs.files.size} files. The 5-agent team collaborated to create a responsive, polished website matching your brief.${skippedInfo}`
+  const summary = `Successfully built a ${session.config?.siteType || 'landing'} page with ${session.fs.files.size} files. The 5-agent team collaborated across ${qaRound} QA round(s) to create a responsive, polished website matching your brief.${skippedInfo}`
 
   session.send('build_complete', {
     files: session.fs.toArray(),
     summary,
     fileCount: session.fs.files.size,
     skippedPhases: session.skippedPhases,
+    qaRounds: qaRound,
     tokenUsage: tokenUsage?.total || null,
   })
 
-  logger.info('Build', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files`, {
+  logger.info('Build', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files, ${qaRound} QA rounds`, {
     skippedPhases: session.skippedPhases,
     tokenUsage: tokenUsage?.total || {},
   })
