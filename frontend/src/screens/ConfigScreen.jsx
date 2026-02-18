@@ -1,19 +1,21 @@
-import { useState } from 'react'
-import { motion } from 'framer-motion'
+import { useState, useRef } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   ArrowLeft, Rocket, Settings2, Sliders, Palette,
   Sparkles, Layout, Target, Users, Zap, Package,
-  Globe, Star, Layers, Type
+  Globe, Star, Layers, Type, Monitor, Briefcase,
+  PenTool, ShoppingCart, BarChart3, Wand2
 } from 'lucide-react'
+import AgentAvatar from '../components/AgentAvatar'
 import './ConfigScreen.css'
 
 const SITE_TYPES = [
-  { value: 'landing', label: 'Landing Page', emoji: '🚀' },
-  { value: 'portfolio', label: 'Portfolio', emoji: '💼' },
-  { value: 'blog', label: 'Blog', emoji: '✍️' },
-  { value: 'ecommerce', label: 'E-commerce', emoji: '🛒' },
-  { value: 'dashboard', label: 'Dashboard', emoji: '📊' },
-  { value: 'custom', label: 'Custom', emoji: '✨' },
+  { value: 'landing', label: 'Landing Page', emoji: '🚀', icon: Rocket, iconColor: '#3b82f6' },
+  { value: 'portfolio', label: 'Portfolio', emoji: '💼', icon: Briefcase, iconColor: '#a855f7' },
+  { value: 'blog', label: 'Blog', emoji: '✍️', icon: PenTool, iconColor: '#22c55e' },
+  { value: 'ecommerce', label: 'E-commerce', emoji: '🛒', icon: ShoppingCart, iconColor: '#eab308' },
+  { value: 'dashboard', label: 'Dashboard', emoji: '📊', icon: BarChart3, iconColor: '#ef4444' },
+  { value: 'custom', label: 'Custom', emoji: '✨', icon: Wand2, iconColor: '#60a5fa' },
 ]
 
 const STYLE_PRESETS = [
@@ -25,9 +27,9 @@ const STYLE_PRESETS = [
 ]
 
 const CODE_QUALITY = [
-  { value: 'speed', label: 'Fast Build', desc: 'Ship quickly, fix later' },
-  { value: 'balanced', label: 'Balanced', desc: 'Speed meets quality' },
-  { value: 'perfectionist', label: 'Perfectionist', desc: 'Every detail matters' },
+  { value: 'speed', label: 'Fast Build', desc: 'Ship quickly, fix later', icon: Zap },
+  { value: 'balanced', label: 'Balanced', desc: 'Speed meets quality', icon: Sliders },
+  { value: 'perfectionist', label: 'Perfectionist', desc: 'Every detail matters', icon: Star },
 ]
 
 const ICON_MAP = {
@@ -35,8 +37,40 @@ const ICON_MAP = {
   Globe, Star, Layers, Type, Settings2,
 }
 
+const AGENTS = ['architect', 'frontend-dev', 'stylist', 'reviewer', 'qa-tester']
+
 function AiBadge() {
   return <span className="config-ai-badge"><Sparkles size={9} /> AI</span>
+}
+
+function SiteTypeIcon({ icon: Icon, color, isActive }) {
+  return (
+    <div className={`config-type-icon-wrap ${isActive ? 'active' : ''}`} style={{ '--icon-color': color }}>
+      <Icon size={20} strokeWidth={1.8} />
+      <div className="config-type-icon-glow" />
+    </div>
+  )
+}
+
+function SliderTrack({ value, min = 0, max = 100 }) {
+  const pct = ((value - min) / (max - min)) * 100
+  return (
+    <div className="config-slider-track-bg">
+      <div
+        className="config-slider-track-fill"
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  )
+}
+
+const sectionVariants = {
+  hidden: { opacity: 0, y: 16 },
+  visible: (i) => ({
+    opacity: 1,
+    y: 0,
+    transition: { delay: i * 0.06, type: 'spring', stiffness: 300, damping: 30 },
+  }),
 }
 
 export default function ConfigScreen({ brief, config: initialConfig, suggestions, onSubmit, onBack }) {
@@ -61,9 +95,12 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
   const questions = suggestions?.customQuestions || []
   const reasoning = suggestions?.reasoning
 
+  let sectionIdx = 0
+
   return (
     <div className="config-screen">
       <div className="config-orb config-orb--purple" />
+      <div className="config-orb config-orb--blue" />
 
       <motion.div
         className="config-container"
@@ -77,28 +114,49 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
             <ArrowLeft size={15} />
             Back
           </button>
-          <div className="config-step">Step 2 of 2</div>
+          <div className="config-step">
+            <span className="config-step-dot" />
+            <span className="config-step-dot config-step-dot--active" />
+            Step 2 of 2
+          </div>
         </div>
 
-        <div className="config-title">
+        <motion.div
+          className="config-title"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
           <h2>Configure the Build</h2>
           <p>
             {reasoning
               ? <><Sparkles size={12} className="config-title-sparkle" /> {reasoning}</>
               : 'Tune how the agents work. You can always change these mid-build.'}
           </p>
-        </div>
+        </motion.div>
 
         {/* Brief summary */}
-        <div className="config-brief-preview">
+        <motion.div
+          className="config-brief-preview"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+        >
           <div className="config-brief-label">Your brief</div>
           <div className="config-brief-text">{brief}</div>
-        </div>
+        </motion.div>
 
         <div className="config-sections">
 
           {/* Site Type */}
-          <div className="config-section">
+          <motion.div
+            className="config-section"
+            custom={sectionIdx++}
+            initial="hidden"
+            animate="visible"
+            variants={sectionVariants}
+          >
+            <div className="config-section-accent" style={{ '--accent-line': 'var(--accent)' }} />
             <div className="config-section-header">
               <Settings2 size={15} />
               <span>Site Type</span>
@@ -106,23 +164,31 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
             <div className="config-site-types">
               {SITE_TYPES.map(type => {
                 const suggested = isSuggested('siteType', type.value)
+                const isActive = config.siteType === type.value
                 return (
                   <button
                     key={type.value}
-                    className={`config-type-btn ${config.siteType === type.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    className={`config-type-btn ${isActive ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
                     onClick={() => update('siteType', type.value)}
                   >
-                    <span>{type.emoji}</span>
-                    <span>{type.label}</span>
+                    <SiteTypeIcon icon={type.icon} color={type.iconColor} isActive={isActive} />
+                    <span className="config-type-label">{type.label}</span>
                     {suggested && <AiBadge />}
                   </button>
                 )
               })}
             </div>
-          </div>
+          </motion.div>
 
           {/* Style Preset */}
-          <div className="config-section">
+          <motion.div
+            className="config-section"
+            custom={sectionIdx++}
+            initial="hidden"
+            animate="visible"
+            variants={sectionVariants}
+          >
+            <div className="config-section-accent" style={{ '--accent-line': 'var(--purple)' }} />
             <div className="config-section-header">
               <Palette size={15} />
               <span>Style Preset</span>
@@ -130,19 +196,21 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
             <div className="config-presets">
               {STYLE_PRESETS.map(preset => {
                 const suggested = isSuggested('stylePreset', preset.value)
-                // Override the first swatch color with suggested primary color if this preset is suggested
                 const colors = (suggested && suggestions?.suggestedConfig?.primaryColor)
                   ? [suggestions.suggestedConfig.primaryColor, ...preset.preview.slice(1)]
                   : preset.preview
+                const isActive = config.stylePreset === preset.value
                 return (
                   <button
                     key={preset.value}
-                    className={`config-preset-btn ${config.stylePreset === preset.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    className={`config-preset-btn ${isActive ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
                     onClick={() => update('stylePreset', preset.value)}
                   >
                     <div className="config-preset-colors">
                       {colors.map((color, i) => (
-                        <div key={i} className="config-preset-swatch" style={{ background: color }} />
+                        <div key={i} className="config-preset-swatch" style={{ '--swatch-color': color }}>
+                          <div className="config-preset-swatch-shimmer" />
+                        </div>
                       ))}
                     </div>
                     <span>{preset.label}</span>
@@ -151,21 +219,35 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                 )
               })}
             </div>
-          </div>
+          </motion.div>
 
           {/* Custom AI Questions */}
           {questions.length > 0 && (
-            <div className="config-section config-section--ai">
+            <motion.div
+              className="config-section config-section--ai"
+              custom={sectionIdx++}
+              initial="hidden"
+              animate="visible"
+              variants={sectionVariants}
+            >
+              <div className="config-section-accent" style={{ '--accent-line': 'var(--accent)' }} />
+              <div className="config-ai-glow-border" />
               <div className="config-section-header">
                 <Sparkles size={15} />
                 <span>Tailored for your project</span>
                 <span className="config-ai-tag">AI generated</span>
               </div>
               <div className="config-custom-questions">
-                {questions.map(q => {
+                {questions.map((q, qi) => {
                   const IconComp = ICON_MAP[q.icon] || Target
                   return (
-                    <div key={q.id} className="config-custom-question">
+                    <motion.div
+                      key={q.id}
+                      className="config-custom-question"
+                      initial={{ opacity: 0, y: 12 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.3 + qi * 0.08, type: 'spring', stiffness: 300, damping: 30 }}
+                    >
                       <div className="config-custom-question-header">
                         <IconComp size={13} />
                         <span className="config-custom-question-label">{q.label}</span>
@@ -188,15 +270,22 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                           </button>
                         ))}
                       </div>
-                    </div>
+                    </motion.div>
                   )
                 })}
               </div>
-            </div>
+            </motion.div>
           )}
 
           {/* Agent Behavior */}
-          <div className="config-section">
+          <motion.div
+            className="config-section"
+            custom={sectionIdx++}
+            initial="hidden"
+            animate="visible"
+            variants={sectionVariants}
+          >
+            <div className="config-section-accent" style={{ '--accent-line': 'var(--frontend-dev)' }} />
             <div className="config-section-header">
               <Sliders size={15} />
               <span>Agent Behavior</span>
@@ -209,12 +298,16 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                   <span className="config-slider-val">{config.agentVerbosity}%</span>
                 </div>
                 <div className="config-slider-desc">How much agents discuss vs silently code</div>
-                <input
-                  type="range" min="0" max="100" step="10"
-                  value={config.agentVerbosity}
-                  onChange={e => update('agentVerbosity', Number(e.target.value))}
-                  className="config-range"
-                />
+                <div className="config-slider-container">
+                  <SliderTrack value={config.agentVerbosity} />
+                  <input
+                    type="range" min="0" max="100" step="10"
+                    value={config.agentVerbosity}
+                    onChange={e => update('agentVerbosity', Number(e.target.value))}
+                    className="config-range"
+                    style={{ '--slider-pct': `${config.agentVerbosity}%` }}
+                  />
+                </div>
                 <div className="config-slider-hints">
                   <span>Silent builders</span>
                   <span>Maximum drama</span>
@@ -227,22 +320,33 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                   <span className="config-slider-val">{config.conflictFrequency}%</span>
                 </div>
                 <div className="config-slider-desc">How often agents disagree and argue</div>
-                <input
-                  type="range" min="0" max="100" step="10"
-                  value={config.conflictFrequency}
-                  onChange={e => update('conflictFrequency', Number(e.target.value))}
-                  className="config-range"
-                />
+                <div className="config-slider-container">
+                  <SliderTrack value={config.conflictFrequency} />
+                  <input
+                    type="range" min="0" max="100" step="10"
+                    value={config.conflictFrequency}
+                    onChange={e => update('conflictFrequency', Number(e.target.value))}
+                    className="config-range"
+                    style={{ '--slider-pct': `${config.conflictFrequency}%` }}
+                  />
+                </div>
                 <div className="config-slider-hints">
                   <span>Always agree</span>
                   <span>Constant chaos</span>
                 </div>
               </div>
             </div>
-          </div>
+          </motion.div>
 
           {/* Code Quality */}
-          <div className="config-section">
+          <motion.div
+            className="config-section"
+            custom={sectionIdx++}
+            initial="hidden"
+            animate="visible"
+            variants={sectionVariants}
+          >
+            <div className="config-section-accent" style={{ '--accent-line': 'var(--warning)' }} />
             <div className="config-section-header">
               <Settings2 size={15} />
               <span>Code Quality Mode</span>
@@ -250,12 +354,17 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
             <div className="config-quality-opts">
               {CODE_QUALITY.map(q => {
                 const suggested = isSuggested('codeQuality', q.value)
+                const isActive = config.codeQuality === q.value
+                const QIcon = q.icon
                 return (
                   <button
                     key={q.value}
-                    className={`config-quality-btn ${config.codeQuality === q.value ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
+                    className={`config-quality-btn ${isActive ? 'active' : ''} ${suggested ? 'suggested' : ''}`}
                     onClick={() => update('codeQuality', q.value)}
                   >
+                    <div className="config-quality-icon">
+                      <QIcon size={16} />
+                    </div>
                     <div className="config-quality-label">
                       {q.label}
                       {suggested && <AiBadge />}
@@ -265,10 +374,17 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                 )
               })}
             </div>
-          </div>
+          </motion.div>
 
           {/* Toggles */}
-          <div className="config-section">
+          <motion.div
+            className="config-section"
+            custom={sectionIdx++}
+            initial="hidden"
+            animate="visible"
+            variants={sectionVariants}
+          >
+            <div className="config-section-accent" style={{ '--accent-line': 'var(--stylist)' }} />
             <div className="config-section-header">
               <Settings2 size={15} />
               <span>Build Options</span>
@@ -297,8 +413,32 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
                 </label>
               ))}
             </div>
-          </div>
+          </motion.div>
         </div>
+
+        {/* Agent Team Ready Row */}
+        <motion.div
+          className="config-agent-row"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+        >
+          <div className="config-agent-row-avatars">
+            {AGENTS.map((agentId, i) => (
+              <motion.div
+                key={agentId}
+                className="config-agent-row-item"
+                initial={{ opacity: 0, scale: 0.5 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ delay: 0.55 + i * 0.06, type: 'spring', stiffness: 400, damping: 20 }}
+              >
+                <AgentAvatar agentId={agentId} size="sm" />
+                <span className="config-agent-status-dot" />
+              </motion.div>
+            ))}
+          </div>
+          <span className="config-agent-row-label">Team ready to build</span>
+        </motion.div>
 
         {/* Submit */}
         <motion.button
@@ -307,8 +447,11 @@ export default function ConfigScreen({ brief, config: initialConfig, suggestions
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
         >
-          <Rocket size={16} />
-          Launch Build
+          <span className="config-submit-rocket">
+            <Rocket size={16} />
+          </span>
+          <span>Launch Build</span>
+          <span className="config-submit-glow" />
         </motion.button>
       </motion.div>
     </div>
