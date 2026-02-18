@@ -286,15 +286,23 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
 
 function buildSrcdoc(html, css, js) {
   return `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>${css || ''}</style>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; -webkit-font-smoothing: antialiased; }
+${css || ''}
+</style>
 </head>
 <body>
 ${html || ''}
-<script>${js || ''}<\/script>
+<script>
+try {
+${js || ''}
+} catch(e) { console.warn('[Preview]', e); }
+<\/script>
 </body>
 </html>`
 }

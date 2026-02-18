@@ -14,6 +14,65 @@ import { stylist } from './agents/stylist.js'
 import { reviewer } from './agents/reviewer.js'
 import { qaTester } from './agents/qa-tester.js'
 
+// ============================================================
+// STRUCTURED LOGGER
+// ============================================================
+
+const LOG_LEVELS = { INFO: 'INFO', WARN: 'WARN', ERROR: 'ERROR' }
+
+function formatTimestamp() {
+  return new Date().toISOString()
+}
+
+const logger = {
+  info(context, message, meta = {}) {
+    const metaStr = Object.keys(meta).length > 0 ? ' ' + JSON.stringify(meta) : ''
+    console.log(`${formatTimestamp()} [INFO] [${context}] ${message}${metaStr}`)
+  },
+  warn(context, message, meta = {}) {
+    const metaStr = Object.keys(meta).length > 0 ? ' ' + JSON.stringify(meta) : ''
+    console.warn(`${formatTimestamp()} [WARN] [${context}] ${message}${metaStr}`)
+  },
+  error(context, message, meta = {}) {
+    const metaStr = Object.keys(meta).length > 0 ? ' ' + JSON.stringify(meta) : ''
+    console.error(`${formatTimestamp()} [ERROR] [${context}] ${message}${metaStr}`)
+  },
+}
+
+// ============================================================
+// CONSTANTS & CONFIGURATION
+// ============================================================
+
+const SERVER_VERSION = '0.2.0'
+const MAX_CONCURRENT_BUILDS = 3
+const MAX_API_CALLS_PER_MINUTE = 5
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
+const SESSION_CLEANUP_INTERVAL_MS = 60 * 1000 // check every minute
+const AGENT_CALL_TIMEOUT_MS = 60 * 1000 // 60 seconds per API call
+const API_RETRY_COUNT = 3
+const BRIEF_MIN_LENGTH = 10
+const BRIEF_MAX_LENGTH = 5000
+
+const serverStartTime = Date.now()
+
+// ============================================================
+// API KEY VALIDATION
+// ============================================================
+
+function isApiKeyValid() {
+  const key = process.env.DEEPSEEK_API_KEY
+  if (!key || key.trim() === '') return false
+  if (key === 'your_deepseek_api_key_here') return false
+  if (key.length < 10) return false
+  return true
+}
+
+const apiKeyValid = isApiKeyValid()
+
+// ============================================================
+// EXPRESS & WEBSOCKET SETUP
+// ============================================================
+
 const app = express()
 const server = createServer(app)
 const wss = new WebSocketServer({ server, path: '/ws' })
@@ -23,7 +82,7 @@ app.use(express.json({ limit: '10mb' }))
 
 // DeepSeek client via OpenAI SDK
 const deepseek = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
+  apiKey: process.env.DEEPSEEK_API_KEY || 'invalid',
   baseURL: 'https://api.deepseek.com',
 })
 
@@ -31,6 +90,187 @@ const AGENTS = [architect, frontendDev, stylist, reviewer, qaTester]
 
 // Active build sessions
 const sessions = new Map()
+
+// ============================================================
+// RATE LIMITER (in-memory)
+// ============================================================
+
+class RateLimiter {
+  constructor() {
+    // Track per-session API call timestamps
+    this.sessionCalls = new Map()
+  }
+
+  getActiveBuildCount() {
+    let count = 0
+    for (const session of sessions.values()) {
+      if (session.phase !== 'COMPLETE' && !session.aborted) {
+        count++
+      }
+    }
+    return count
+  }
+
+  canStartBuild() {
+    return this.getActiveBuildCount() < MAX_CONCURRENT_BUILDS
+  }
+
+  recordApiCall(sessionId) {
+    if (!this.sessionCalls.has(sessionId)) {
+      this.sessionCalls.set(sessionId, [])
+    }
+    this.sessionCalls.get(sessionId).push(Date.now())
+  }
+
+  canMakeApiCall(sessionId) {
+    if (!this.sessionCalls.has(sessionId)) return true
+    const calls = this.sessionCalls.get(sessionId)
+    const oneMinuteAgo = Date.now() - 60000
+    // Filter to only calls in the last minute
+    const recentCalls = calls.filter(ts => ts > oneMinuteAgo)
+    this.sessionCalls.set(sessionId, recentCalls)
+    return recentCalls.length < MAX_API_CALLS_PER_MINUTE
+  }
+
+  async waitForApiSlot(sessionId) {
+    while (!this.canMakeApiCall(sessionId)) {
+      logger.info('RateLimiter', `Session ${sessionId.slice(0, 8)} waiting for API rate limit slot`)
+      await sleep(5000)
+    }
+  }
+
+  cleanup(sessionId) {
+    this.sessionCalls.delete(sessionId)
+  }
+}
+
+const rateLimiter = new RateLimiter()
+
+// ============================================================
+// TOKEN USAGE TRACKER
+// ============================================================
+
+class TokenTracker {
+  constructor() {
+    this.sessions = new Map()
+  }
+
+  record(sessionId, agentId, usage) {
+    if (!this.sessions.has(sessionId)) {
+      this.sessions.set(sessionId, { total: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, byAgent: {} })
+    }
+    const sessionData = this.sessions.get(sessionId)
+    const promptTokens = usage?.prompt_tokens || 0
+    const completionTokens = usage?.completion_tokens || 0
+    const totalTokens = promptTokens + completionTokens
+
+    sessionData.total.promptTokens += promptTokens
+    sessionData.total.completionTokens += completionTokens
+    sessionData.total.totalTokens += totalTokens
+
+    if (!sessionData.byAgent[agentId]) {
+      sessionData.byAgent[agentId] = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+    }
+    sessionData.byAgent[agentId].promptTokens += promptTokens
+    sessionData.byAgent[agentId].completionTokens += completionTokens
+    sessionData.byAgent[agentId].totalTokens += totalTokens
+  }
+
+  getSessionUsage(sessionId) {
+    return this.sessions.get(sessionId) || null
+  }
+
+  cleanup(sessionId) {
+    this.sessions.delete(sessionId)
+  }
+}
+
+const tokenTracker = new TokenTracker()
+
+// ============================================================
+// SESSION CLEANUP (auto-cleanup after 30 min inactivity)
+// ============================================================
+
+function cleanupStaleSessions() {
+  const now = Date.now()
+  for (const [id, session] of sessions.entries()) {
+    const idleTime = now - session.lastActivity
+    if (idleTime > SESSION_TIMEOUT_MS) {
+      logger.info('SessionCleanup', `Removing stale session ${id.slice(0, 8)}`, {
+        idleMinutes: Math.round(idleTime / 60000),
+        phase: session.phase,
+      })
+      session.abort()
+      rateLimiter.cleanup(id)
+      tokenTracker.cleanup(id)
+      sessions.delete(id)
+    }
+  }
+}
+
+const cleanupInterval = setInterval(cleanupStaleSessions, SESSION_CLEANUP_INTERVAL_MS)
+
+// Allow the process to exit cleanly
+cleanupInterval.unref()
+
+// ============================================================
+// INPUT VALIDATION
+// ============================================================
+
+function validateBrief(brief) {
+  if (typeof brief !== 'string') {
+    return { valid: false, error: 'Brief must be a string' }
+  }
+  const trimmed = brief.trim()
+  if (trimmed.length < BRIEF_MIN_LENGTH) {
+    return { valid: false, error: `Brief must be at least ${BRIEF_MIN_LENGTH} characters (got ${trimmed.length})` }
+  }
+  if (trimmed.length > BRIEF_MAX_LENGTH) {
+    return { valid: false, error: `Brief must be at most ${BRIEF_MAX_LENGTH} characters (got ${trimmed.length})` }
+  }
+  return { valid: true, error: null }
+}
+
+function validateConfig(config) {
+  if (config === undefined || config === null) {
+    return { valid: true, config: {}, error: null }
+  }
+  if (typeof config !== 'object' || Array.isArray(config)) {
+    return { valid: false, config: null, error: 'Config must be a plain object' }
+  }
+
+  const allowedSiteTypes = ['landing', 'portfolio', 'blog', 'ecommerce', 'dashboard', 'custom']
+  const allowedPresets = ['modern-dark', 'clean-minimal', 'bold-colorful', 'corporate', 'retro']
+  const allowedCodeQuality = ['speed', 'balanced', 'perfectionist']
+
+  const validated = { ...config }
+
+  if (validated.siteType && !allowedSiteTypes.includes(validated.siteType)) {
+    return { valid: false, config: null, error: `Invalid siteType "${validated.siteType}". Allowed: ${allowedSiteTypes.join(', ')}` }
+  }
+  if (validated.stylePreset && !allowedPresets.includes(validated.stylePreset)) {
+    return { valid: false, config: null, error: `Invalid stylePreset "${validated.stylePreset}". Allowed: ${allowedPresets.join(', ')}` }
+  }
+  if (validated.codeQuality && !allowedCodeQuality.includes(validated.codeQuality)) {
+    return { valid: false, config: null, error: `Invalid codeQuality "${validated.codeQuality}". Allowed: ${allowedCodeQuality.join(', ')}` }
+  }
+  if (validated.primaryColor && typeof validated.primaryColor === 'string') {
+    if (!/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(validated.primaryColor)) {
+      return { valid: false, config: null, error: `Invalid primaryColor "${validated.primaryColor}". Must be a valid hex color (e.g. #3b82f6)` }
+    }
+  }
+  if (validated.animations !== undefined && typeof validated.animations !== 'boolean') {
+    return { valid: false, config: null, error: 'Config "animations" must be a boolean' }
+  }
+  if (validated.responsive !== undefined && typeof validated.responsive !== 'boolean') {
+    return { valid: false, config: null, error: 'Config "responsive" must be a boolean' }
+  }
+  if (validated.darkMode !== undefined && typeof validated.darkMode !== 'boolean') {
+    return { valid: false, config: null, error: 'Config "darkMode" must be a boolean' }
+  }
+
+  return { valid: true, config: validated, error: null }
+}
 
 // ============================================================
 // BUILD SESSION CLASS
@@ -51,31 +291,47 @@ class BuildSession {
     this.aborted = false
     this.pendingFeedback = []
     this.progressPercent = 0
+    this.createdAt = Date.now()
+    this.lastActivity = Date.now()
+    this.skippedPhases = []
+  }
+
+  touchActivity() {
+    this.lastActivity = Date.now()
   }
 
   send(type, data = {}) {
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type, ...data, timestamp: Date.now() }))
+    try {
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({ type, ...data, timestamp: Date.now() }))
+      }
+    } catch (err) {
+      logger.error('BuildSession', `Failed to send message type="${type}" to session ${this.id.slice(0, 8)}`, { error: err.message })
     }
   }
 
   sendThinking(agentId, thought) {
+    this.touchActivity()
     this.send('agent_thinking', { agentId, thought })
     this.messages.push({ type: 'agent_thinking', agentId, thought })
   }
 
   sendMessage(agentId, message, targetAgent = null) {
+    this.touchActivity()
     this.send('agent_message', { agentId, message, targetAgent })
     this.messages.push({ type: 'agent_message', agentId, message, targetAgent })
   }
 
   sendFileCreated(path, content, agentId, reason = '') {
+    this.touchActivity()
     this.fs.create(path, content, agentId)
     this.send('file_created', { path, content, agentId, reason })
     this.messages.push({ type: 'file_created', path, agentId })
+    this.updatePreview()
   }
 
   sendFileModified(path, content, agentId, reason = '') {
+    this.touchActivity()
     const file = this.fs.modify(path, content, agentId)
     this.send('file_modified', { path, content, diff: file.diff, agentId, reason })
     this.messages.push({ type: 'file_modified', path, agentId })
@@ -84,13 +340,18 @@ class BuildSession {
   }
 
   updatePreview() {
-    const preview = this.fs.buildPreview()
-    if (preview.html) {
-      this.send('preview_update', preview)
+    try {
+      const preview = this.fs.buildPreview()
+      if (preview.html) {
+        this.send('preview_update', preview)
+      }
+    } catch (err) {
+      logger.error('BuildSession', `Preview update failed for session ${this.id.slice(0, 8)}`, { error: err.message })
     }
   }
 
   sendPhaseChange(to) {
+    this.touchActivity()
     const from = this.phase
     this.phase = to
     this.send('phase_change', { from, to })
@@ -98,6 +359,7 @@ class BuildSession {
   }
 
   setProgress(percent, milestone = '') {
+    this.touchActivity()
     this.progressPercent = percent
     this.send('build_progress', { percent, milestone })
   }
@@ -123,6 +385,7 @@ class BuildSession {
   }
 
   addFeedback(message) {
+    this.touchActivity()
     this.pendingFeedback.push(message)
   }
 
@@ -145,26 +408,77 @@ wss.on('connection', (ws) => {
   const clientId = uuidv4()
   let currentSession = null
 
-  console.log(`[WS] Client connected: ${clientId}`)
+  logger.info('WS', `Client connected: ${clientId}`)
 
   ws.on('message', async (data) => {
     try {
       const msg = JSON.parse(data.toString())
-      console.log(`[WS] ${clientId} → ${msg.type}`)
+      logger.info('WS', `${clientId} -> ${msg.type}`)
 
       switch (msg.type) {
         case 'start_build': {
+          // Validate API key
+          if (!apiKeyValid) {
+            ws.send(JSON.stringify({
+              type: 'build_error',
+              message: 'Server is not configured with a valid DeepSeek API key. Cannot start build.',
+              timestamp: Date.now(),
+            }))
+            logger.error('WS', 'Build rejected: invalid or missing DEEPSEEK_API_KEY')
+            break
+          }
+
+          // Validate brief
+          const briefValidation = validateBrief(msg.brief)
+          if (!briefValidation.valid) {
+            ws.send(JSON.stringify({
+              type: 'build_error',
+              message: `Invalid brief: ${briefValidation.error}`,
+              timestamp: Date.now(),
+            }))
+            logger.warn('WS', `Build rejected: ${briefValidation.error}`)
+            break
+          }
+
+          // Validate config
+          const configValidation = validateConfig(msg.config)
+          if (!configValidation.valid) {
+            ws.send(JSON.stringify({
+              type: 'build_error',
+              message: `Invalid config: ${configValidation.error}`,
+              timestamp: Date.now(),
+            }))
+            logger.warn('WS', `Build rejected: ${configValidation.error}`)
+            break
+          }
+
+          // Rate limit: max concurrent builds
+          if (!rateLimiter.canStartBuild()) {
+            ws.send(JSON.stringify({
+              type: 'build_error',
+              message: `Server is at maximum capacity (${MAX_CONCURRENT_BUILDS} concurrent builds). Please try again shortly.`,
+              timestamp: Date.now(),
+            }))
+            logger.warn('WS', `Build rejected: max concurrent builds reached (${MAX_CONCURRENT_BUILDS})`)
+            break
+          }
+
           if (currentSession) {
             currentSession.abort()
           }
           const sessionId = uuidv4()
-          const session = new BuildSession(ws, sessionId, msg.brief, msg.config || {})
+          const session = new BuildSession(ws, sessionId, msg.brief.trim(), configValidation.config)
           currentSession = session
           sessions.set(sessionId, session)
 
+          logger.info('WS', `Build session started: ${sessionId.slice(0, 8)}`, {
+            siteType: configValidation.config.siteType || 'landing',
+            briefLength: msg.brief.trim().length,
+          })
+
           // Run the build in background
           runBuild(session).catch(err => {
-            console.error('[Build] Error:', err)
+            logger.error('Build', `Unhandled build error for session ${sessionId.slice(0, 8)}`, { error: err.message })
             session.send('build_error', { message: err.message })
           })
           break
@@ -180,46 +494,88 @@ wss.on('connection', (ws) => {
         case 'resolve_conflict': {
           if (currentSession) {
             currentSession.resolvedConflict = msg
+            currentSession.touchActivity()
           }
           break
         }
 
         case 'pause_build': {
-          if (currentSession) currentSession.paused = true
+          if (currentSession) {
+            currentSession.paused = true
+            currentSession.touchActivity()
+          }
           break
         }
 
         case 'resume_build': {
-          if (currentSession) currentSession.paused = false
+          if (currentSession) {
+            currentSession.paused = false
+            currentSession.touchActivity()
+          }
           break
         }
 
         case 'approve_phase': {
-          if (currentSession) currentSession.phaseApproved = true
+          if (currentSession) {
+            currentSession.phaseApproved = true
+            currentSession.touchActivity()
+          }
           break
         }
       }
     } catch (err) {
-      console.error('[WS] Message parse error:', err)
+      logger.error('WS', `Message parse error from client ${clientId}`, { error: err.message })
     }
   })
 
   ws.on('close', () => {
-    console.log(`[WS] Client disconnected: ${clientId}`)
+    logger.info('WS', `Client disconnected: ${clientId}`)
     if (currentSession) {
       currentSession.abort()
       sessions.delete(currentSession.id)
+      rateLimiter.cleanup(currentSession.id)
     }
   })
 })
 
 // ============================================================
-// AGENT CALL
+// AGENT CALL (with retry, timeout, rate limiting, error recovery)
 // ============================================================
+
+async function callAgentWithRetry(session, agent, userPrompt, additionalContext = '') {
+  for (let attempt = 1; attempt <= API_RETRY_COUNT; attempt++) {
+    try {
+      const result = await callAgent(session, agent, userPrompt, additionalContext)
+      return result
+    } catch (err) {
+      const isLastAttempt = attempt === API_RETRY_COUNT
+
+      if (isLastAttempt) {
+        logger.error('AgentRetry', `All ${API_RETRY_COUNT} attempts failed for agent ${agent.id} in session ${session.id.slice(0, 8)}`, { error: err.message })
+        // Notify the client about the failure
+        session.send('agent_error', {
+          agentId: agent.id,
+          message: `Agent ${agent.id} failed after ${API_RETRY_COUNT} attempts: ${err.message}`,
+          recoverable: true,
+        })
+        return null
+      }
+
+      // Exponential backoff: 2s, 4s, 8s ...
+      const backoffMs = Math.pow(2, attempt) * 1000
+      logger.warn('AgentRetry', `Attempt ${attempt}/${API_RETRY_COUNT} failed for agent ${agent.id}, retrying in ${backoffMs}ms`, { error: err.message })
+      await sleep(backoffMs)
+    }
+  }
+  return null
+}
 
 async function callAgent(session, agent, userPrompt, additionalContext = '') {
   await session.waitIfPaused()
   if (session.aborted) return null
+
+  // Rate limiting: wait for a slot
+  await rateLimiter.waitForApiSlot(session.id)
 
   const filesContext = session.getAllFiles()
     .slice(-10)
@@ -254,6 +610,9 @@ Dark mode site: ${session.config?.darkMode ? 'yes' : 'no'}
 ## ARCHITECT'S PLAN
 ${session.plan ? JSON.stringify(session.plan, null, 2) : 'Not yet created'}
 
+## DESIGN GUIDANCE
+${session.plan?.template?.designGuidance || ''}
+
 ## RECENT TEAM ACTIVITY
 ${recentMsgs || 'No recent activity'}
 
@@ -269,30 +628,68 @@ Remember to use the output formats in your system prompt. Write complete, workin
     },
   ]
 
+  // Record the API call for rate limiting
+  rateLimiter.recordApiCall(session.id)
+
+  // Create the API call with a timeout
+  const controller = new AbortController()
+  const timeoutHandle = setTimeout(() => controller.abort(), AGENT_CALL_TIMEOUT_MS)
+
   try {
-    const response = await deepseek.chat.completions.create({
-      model: 'deepseek-reasoner',
-      messages,
-      max_tokens: 8000,
-      stream: false,
-      // Note: deepseek-reasoner does not support temperature parameter
-    })
+    const response = await deepseek.chat.completions.create(
+      {
+        model: 'deepseek-reasoner',
+        messages,
+        max_tokens: 8000,
+        stream: false,
+        // Note: deepseek-reasoner does not support temperature parameter
+      },
+      { signal: controller.signal }
+    )
 
-    const choice = response.choices[0]?.message
+    clearTimeout(timeoutHandle)
 
-    // R1 returns reasoning_content (chain-of-thought) — stream it as thinking events
-    if (choice?.reasoning_content) {
-      // Send reasoning as thinking in chunks (split by sentences for UX)
+    // Track token usage
+    if (response.usage) {
+      tokenTracker.record(session.id, agent.id, response.usage)
+      logger.info('TokenUsage', `Agent ${agent.id} session ${session.id.slice(0, 8)}`, {
+        prompt: response.usage.prompt_tokens || 0,
+        completion: response.usage.completion_tokens || 0,
+      })
+    }
+
+    const choice = response.choices?.[0]?.message
+
+    // Handle null/empty response
+    if (!choice) {
+      logger.warn('Agent', `Agent ${agent.id} returned empty response for session ${session.id.slice(0, 8)}`)
+      throw new Error('API returned empty response (no choices)')
+    }
+
+    // R1 returns reasoning_content (chain-of-thought) -- stream it as thinking events
+    if (choice.reasoning_content) {
       const reasoning = choice.reasoning_content.trim()
       if (reasoning && session.ws.readyState === WebSocket.OPEN) {
         session.sendThinking(agent.id, reasoning.slice(0, 600) + (reasoning.length > 600 ? '...' : ''))
       }
     }
 
-    return choice?.content || ''
+    const content = choice.content || ''
+    if (!content.trim()) {
+      logger.warn('Agent', `Agent ${agent.id} returned empty content for session ${session.id.slice(0, 8)}`)
+    }
+
+    return content
   } catch (err) {
-    console.error(`[Agent:${agent.id}] API Error:`, err.message)
-    return null
+    clearTimeout(timeoutHandle)
+
+    if (err.name === 'AbortError' || err.message?.includes('aborted')) {
+      logger.error('Agent', `Agent ${agent.id} timed out after ${AGENT_CALL_TIMEOUT_MS}ms for session ${session.id.slice(0, 8)}`)
+      throw new Error(`Agent ${agent.id} timed out after ${AGENT_CALL_TIMEOUT_MS / 1000}s`)
+    }
+
+    logger.error('Agent', `Agent ${agent.id} API error for session ${session.id.slice(0, 8)}`, { error: err.message })
+    throw err
   }
 }
 
@@ -301,84 +698,91 @@ Remember to use the output formats in your system prompt. Write complete, workin
 // ============================================================
 
 function parseAgentResponse(session, agentId, responseText) {
-  if (!responseText) return
-
-  // Parse THINKING blocks
-  const thinkingMatches = responseText.matchAll(/===THINKING===([\s\S]*?)===END_THINKING===/g)
-  for (const match of thinkingMatches) {
-    session.sendThinking(agentId, match[1].trim())
+  if (!responseText) {
+    logger.warn('Parser', `No response text to parse from agent ${agentId} in session ${session.id.slice(0, 8)}`)
+    return
   }
 
-  // Parse MESSAGE blocks
-  const messageMatches = responseText.matchAll(/===MESSAGE:\s*@?(\w[\w-]*)===([\s\S]*?)===END_MESSAGE===/g)
-  for (const match of messageMatches) {
-    const targetAgent = match[1].trim().toLowerCase()
-    const message = match[2].trim()
-    // Map name to agent ID
-    const targetId = resolveAgentId(targetAgent)
-    session.sendMessage(agentId, message, targetId)
-  }
-
-  // Parse FILE_CREATE blocks
-  const createMatches = responseText.matchAll(/===FILE_CREATE:\s*([^\n=]+)===([\s\S]*?)===END_FILE===/g)
-  for (const match of createMatches) {
-    const path = match[1].trim()
-    const content = match[2].trim()
-    if (path && content) {
-      session.sendFileCreated(path, content, agentId, 'Created by ' + agentId)
+  try {
+    // Parse THINKING blocks
+    const thinkingMatches = responseText.matchAll(/===THINKING===([\s\S]*?)===END_THINKING===/g)
+    for (const match of thinkingMatches) {
+      session.sendThinking(agentId, match[1].trim())
     }
-  }
 
-  // Parse FILE_MODIFY blocks
-  const modifyMatches = responseText.matchAll(/===FILE_MODIFY:\s*([^\n=]+)===([\s\S]*?)===END_FILE===/g)
-  for (const match of modifyMatches) {
-    const path = match[1].trim()
-    const content = match[2].trim()
-    if (path && content) {
-      // Only modify if file exists, otherwise create
-      if (session.fs.get(path)) {
-        session.sendFileModified(path, content, agentId, 'Modified by ' + agentId)
-      } else {
+    // Parse MESSAGE blocks
+    const messageMatches = responseText.matchAll(/===MESSAGE:\s*@?(\w[\w-]*)===([\s\S]*?)===END_MESSAGE===/g)
+    for (const match of messageMatches) {
+      const targetAgent = match[1].trim().toLowerCase()
+      const message = match[2].trim()
+      // Map name to agent ID
+      const targetId = resolveAgentId(targetAgent)
+      session.sendMessage(agentId, message, targetId)
+    }
+
+    // Parse FILE_CREATE blocks
+    const createMatches = responseText.matchAll(/===FILE_CREATE:\s*([^\n=]+)===([\s\S]*?)===END_FILE===/g)
+    for (const match of createMatches) {
+      const path = match[1].trim()
+      const content = match[2].trim()
+      if (path && content) {
         session.sendFileCreated(path, content, agentId, 'Created by ' + agentId)
       }
     }
-  }
 
-  // Parse REVIEW_COMMENT blocks
-  const reviewMatches = responseText.matchAll(/===REVIEW_COMMENT:\s*([^\n=]+)===([\s\S]*?)===END_REVIEW===/g)
-  for (const match of reviewMatches) {
-    const fileAndLine = match[1].trim()
-    const comment = match[2].trim()
-    const [file, line] = fileAndLine.split(':')
-    session.send('review_comment', {
-      agentId,
-      file: file?.trim(),
-      line: line ? parseInt(line) : null,
-      comment,
-    })
-    session.reviewComments.push({ file: file?.trim(), line, comment, agentId })
-    session.messages.push({ type: 'review_comment', agentId, file: file?.trim(), comment })
-  }
-
-  // Parse BUG_REPORT blocks
-  const bugMatches = responseText.matchAll(/===BUG_REPORT:\s*severity=(\w+)===([\s\S]*?)===END_BUG===/g)
-  for (const match of bugMatches) {
-    const severity = match[1].trim().toLowerCase()
-    const body = match[2].trim()
-    // Extract description line
-    const descLine = body.split('\n').find(l => l.startsWith('Issue:'))
-    const description = descLine ? descLine.replace('Issue:', '').trim() : body.split('\n')[0]
-    session.send('bug_report', { agentId, severity, description, body })
-    session.messages.push({ type: 'bug_report', agentId, severity, description })
-  }
-
-  // Check for plain message (fallback — if agent wrote something but no format)
-  if (!responseText.includes('===')) {
-    // Treat the whole response as a message
-    const short = responseText.slice(0, 500).trim()
-    if (short) {
-      session.sendMessage(agentId, short)
+    // Parse FILE_MODIFY blocks
+    const modifyMatches = responseText.matchAll(/===FILE_MODIFY:\s*([^\n=]+)===([\s\S]*?)===END_FILE===/g)
+    for (const match of modifyMatches) {
+      const path = match[1].trim()
+      const content = match[2].trim()
+      if (path && content) {
+        // Only modify if file exists, otherwise create
+        if (session.fs.get(path)) {
+          session.sendFileModified(path, content, agentId, 'Modified by ' + agentId)
+        } else {
+          session.sendFileCreated(path, content, agentId, 'Created by ' + agentId)
+        }
+      }
     }
+
+    // Parse REVIEW_COMMENT blocks
+    const reviewMatches = responseText.matchAll(/===REVIEW_COMMENT:\s*([^\n=]+)===([\s\S]*?)===END_REVIEW===/g)
+    for (const match of reviewMatches) {
+      const fileAndLine = match[1].trim()
+      const comment = match[2].trim()
+      const [file, line] = fileAndLine.split(':')
+      session.send('review_comment', {
+        agentId,
+        file: file?.trim(),
+        line: line ? parseInt(line) : null,
+        comment,
+      })
+      session.reviewComments.push({ file: file?.trim(), line, comment, agentId })
+      session.messages.push({ type: 'review_comment', agentId, file: file?.trim(), comment })
+    }
+
+    // Parse BUG_REPORT blocks
+    const bugMatches = responseText.matchAll(/===BUG_REPORT:\s*severity=(\w+)===([\s\S]*?)===END_BUG===/g)
+    for (const match of bugMatches) {
+      const severity = match[1].trim().toLowerCase()
+      const body = match[2].trim()
+      // Extract description line
+      const descLine = body.split('\n').find(l => l.startsWith('Issue:'))
+      const description = descLine ? descLine.replace('Issue:', '').trim() : body.split('\n')[0]
+      session.send('bug_report', { agentId, severity, description, body })
+      session.messages.push({ type: 'bug_report', agentId, severity, description })
+    }
+
+    // Check for plain message (fallback -- if agent wrote something but no format)
+    if (!responseText.includes('===')) {
+      // Treat the whole response as a message
+      const short = responseText.slice(0, 500).trim()
+      if (short) {
+        session.sendMessage(agentId, short)
+      }
+    }
+  } catch (err) {
+    logger.error('Parser', `Error parsing response from agent ${agentId} in session ${session.id.slice(0, 8)}`, { error: err.message })
   }
 }
 
@@ -394,14 +798,22 @@ function resolveAgentId(name) {
 }
 
 // ============================================================
-// BUILD ORCHESTRATION
+// BUILD ORCHESTRATION (with error recovery per phase)
 // ============================================================
 
 async function runBuild(session) {
   const { config } = session
-  const template = getBaseTemplate(config?.siteType || 'landing', config)
 
-  console.log(`[Build:${session.id}] Starting — ${session.brief.slice(0, 60)}`)
+  let template
+  try {
+    template = getBaseTemplate(config?.siteType || 'landing', config)
+  } catch (err) {
+    logger.error('Build', `Failed to get base template for session ${session.id.slice(0, 8)}`, { error: err.message })
+    session.send('build_error', { message: 'Failed to load base template: ' + err.message })
+    return
+  }
+
+  logger.info('Build', `Starting build ${session.id.slice(0, 8)} -- "${session.brief.slice(0, 60)}"`)
 
   // ── PHASE 1: PLANNING ──
   session.sendPhaseChange('PLANNING')
@@ -409,10 +821,10 @@ async function runBuild(session) {
 
   session.sendThinking('architect', `Reading the brief carefully: "${session.brief.slice(0, 120)}..." — determining file structure, sections, and design direction.`)
 
-  const planResponse = await callAgent(
+  const planResponse = await callAgentWithRetry(
     session,
     architect,
-    `You are starting a new website project. Analyze this brief deeply and build the foundation.
+    `You are starting a new website project. Read the brief carefully and build a stunning foundation.
 
 USER BRIEF: "${session.brief}"
 
@@ -420,34 +832,50 @@ CONFIGURATION:
 - Site type: ${config?.siteType || 'landing'}
 - Style preset: ${config?.stylePreset || 'modern-dark'}
 - Primary color: ${config?.primaryColor || '#3b82f6'}
-- Dark mode site: ${config?.darkMode ? 'YES — build dark themed' : 'no'}
-- Animations: ${config?.animations ? 'YES — include them' : 'keep minimal'}
-- Responsive: ${config?.responsive ? 'YES — mobile-first' : 'desktop only'}
-- Code quality: ${config?.codeQuality || 'balanced'}
+- Dark mode site: ${config?.darkMode ? 'YES — dark backgrounds, light text, glowing accents' : 'LIGHT — clean whites, subtle shadows'}
+- Animations: ${config?.animations ? 'YES — scroll-triggered entrances, hover effects, smooth transitions' : 'keep minimal — only essential hover states'}
+- Responsive: ${config?.responsive ? 'YES — mobile-first, must work beautifully at 375px, 768px, 1440px' : 'desktop-optimized'}
 
-STEP 1 — THINK through the architecture:
-- What are the exact named sections this specific website needs? (e.g. HeroSection, PricingCards, TestimonialSlider)
-- What JavaScript interactions are needed? (forms, modals, scroll effects, etc.)
-- What unique visual elements does this brief require?
+STEP 1 — THINK through the project:
+- Who is the target audience? What do they care about?
+- What's the conversion goal? (sign up, buy, contact, hire, learn?)
+- What sections does this specific brief need? List them with purpose (e.g., "Pricing — 3 tiers to nudge users toward the mid tier")
+- What makes this project unique vs a generic template?
 
-STEP 2 — Create index.html with REAL content:
-- Write ALL the actual text content, headings, copy (don't use Lorem ipsum)
-- Include all sections from the brief with proper HTML5 semantics
-- Add descriptive class names that Leo can style (e.g. .hero__cta, .pricing-card--featured)
-- Link to css/styles.css and js/main.js
+STEP 2 — Create index.html with RICH, REAL content:
+- Write compelling, specific copy for every section — NOT generic "Welcome to our website" filler
+- Include ALL sections listed below with proper HTML5 semantics (<section>, <article>, <nav>, etc.)
+- Add descriptive BEM class names: .hero__headline, .pricing-card--featured, .testimonial__quote
+- Include proper <head> with meta tags, and link to css/styles.css and js/main.js
+- Add class="animate-on-scroll" to elements that should animate in on scroll
+- Use data-* attributes for JS hooks: data-nav-toggle, data-accordion-trigger, etc.
 
-STEP 3 — Brief the team:
-- MESSAGE @maja with specific JS tasks she needs to implement (list them by section)
-- MESSAGE @leo with the design direction, color palette intent, and which sections need special attention
+STEP 3 — Brief the team with SPECIFIC creative direction:
+- MESSAGE @maja listing every JS interaction: "1. Hamburger toggle on [data-nav-toggle] 2. Smooth scroll on a[href^='#'] 3. FAQ accordion on [data-accordion-trigger]..."
+- MESSAGE @leo with: specific color palette (hex values), typography mood (e.g., "bold modern sans-serif, tight letter-spacing on headlines"), visual references (e.g., "like Stripe's homepage but warmer"), which sections need special treatment
 
-Base template: ${template.description}
-Suggested sections: ${template.sections.join(', ')}
+TEMPLATE GUIDANCE:
+${template.description}
 
-Write complete, production-ready HTML with meaningful content from the brief.`
+REQUIRED SECTIONS (adapt to the brief):
+${template.sections.join('\n')}
+
+PLANNED FILES: ${template.files.join(', ')}
+
+${template.designGuidance || ''}
+
+Write complete, content-rich HTML. Every section should have enough real content that a client could read it and say "yes, this is my website."`
   )
 
   if (session.aborted) return
-  parseAgentResponse(session, 'architect', planResponse)
+
+  if (planResponse) {
+    parseAgentResponse(session, 'architect', planResponse)
+  } else {
+    logger.warn('Build', `Planning phase failed for session ${session.id.slice(0, 8)}, skipping to next phase`)
+    session.skippedPhases.push('PLANNING')
+    session.send('phase_skipped', { phase: 'PLANNING', reason: 'Architect agent failed to respond' })
+  }
 
   // Extract plan from response
   session.plan = {
@@ -456,6 +884,7 @@ Write complete, production-ready HTML with meaningful content from the brief.`
     brief: session.brief,
     filesPlanned: template.files,
     sectionsPlanned: template.sections,
+    designGuidance: template.designGuidance || '',
   }
 
   session.setProgress(15, 'Planning complete')
@@ -467,29 +896,45 @@ Write complete, production-ready HTML with meaningful content from the brief.`
 
   if (session.aborted) return
 
-  const scaffoldResponse = await callAgent(
+  const scaffoldResponse = await callAgentWithRetry(
     session,
     frontendDev,
-    `Kuba just finished the HTML structure. Your turn, Maja.
+    `Kuba finished the HTML. Your turn to make it interactive.
 
-Your tasks:
-1. READ index.html carefully — understand every section and class name Kuba used
-2. Create js/main.js with JavaScript for ALL interactive elements. This must include:
-   - Mobile navigation toggle (hamburger menu)
-   - Smooth scroll behavior for anchor links
-   - Any form validation mentioned in the brief
-   - Scroll-triggered animations if animations are enabled (${config?.animations ? 'YES, add them' : 'no'})
-   - Any specific interactions the brief mentions
-3. MESSAGE @leo telling him EXACTLY what class names you and Kuba used in the HTML, so he can write CSS that targets them correctly. List every major section class.
-4. MESSAGE @nova to confirm you've got the HTML structure documented for review
+READ index.html carefully — note every section, class name, and data-* attribute.
 
-After finishing, MESSAGE @kuba confirming what you built and any structural concerns.
+Create js/main.js with ALL of this:
+
+1. MOBILE NAV: hamburger toggle on [data-nav-toggle], close on link click, close on outside click, close on Escape key
+2. SMOOTH SCROLL: all a[href^="#"] links scroll smoothly to their target
+3. STICKY NAVBAR: add .is-scrolled class when scrolled > 50px
+4. SCROLL ANIMATIONS: IntersectionObserver that adds .is-visible to all .animate-on-scroll elements
+${config?.animations ? '5. COUNTER ANIMATION: animate number counters when they scroll into view' : ''}
+6. FAQ ACCORDION: if there are [data-accordion-trigger] elements, make them toggle .is-open on parent [data-accordion-item]
+7. FORM VALIDATION: if there's a form, validate on submit with inline error messages (not alert)
+8. Any specific interactions mentioned in the brief or in Kuba's messages to you
+
+ALSO create js/animations.js if animations are enabled (${config?.animations ? 'YES' : 'no'}):
+- Scroll-triggered entrance animations using IntersectionObserver
+- Parallax effect on hero if applicable
+- Staggered animation on card grids
+
+After writing code:
+- MESSAGE @leo listing ALL state classes you're toggling: .is-open, .is-visible, .is-scrolled, .is-invalid, .is-valid, etc. — he needs to write CSS for ALL of these
+- MESSAGE @nova that JS is ready for review
 
 The brief: "${session.brief.slice(0, 200)}"`
   )
 
   if (session.aborted) return
-  parseAgentResponse(session, 'frontend-dev', scaffoldResponse)
+
+  if (scaffoldResponse) {
+    parseAgentResponse(session, 'frontend-dev', scaffoldResponse)
+  } else {
+    logger.warn('Build', `Scaffolding phase failed for session ${session.id.slice(0, 8)}, skipping`)
+    session.skippedPhases.push('SCAFFOLDING')
+    session.send('phase_skipped', { phase: 'SCAFFOLDING', reason: 'Frontend dev agent failed to respond' })
+  }
 
   session.setProgress(30, 'Scaffolding complete')
   await sleep(600)
@@ -501,47 +946,60 @@ The brief: "${session.brief.slice(0, 200)}"`
   // Leo styles in parallel with Maja coding
   session.sendThinking('stylist', `Kuba and Maja have finished the structure. Time to make this look incredible. Brief says: "${session.brief.slice(0, 100)}..." — I can already see the visual direction.`)
 
-  const stylistResponse = await callAgent(
+  const stylistResponse = await callAgentWithRetry(
     session,
     stylist,
-    `Maja and Kuba have built the HTML structure. Now it's your turn to make it look stunning.
+    `Kuba and Maja have built the HTML and JS. Now make this look INCREDIBLE.
 
-READ all existing files carefully, especially every class name and section in index.html.
+READ index.html carefully — note every section, every class name, every element.
+READ the messages from Kuba and Maja — they'll tell you the design direction and JS state classes.
 
-Create css/styles.css with a COMPLETE, professional design system:
+Create css/styles.css following the DESIGN SYSTEM STRUCTURE from your system prompt. This must be COMPLETE — every section styled, every interactive state handled.
 
-1. CSS VARIABLES (design tokens):
-   - Color palette: primary ${config?.primaryColor || '#3b82f6'}, backgrounds, surfaces, text colors
-   - Typography scale: font sizes, weights, line heights
-   - Spacing system: consistent gap/padding values
-   - Border radius, shadows, transitions
+DESIGN PARAMETERS:
+- Style preset: ${config?.stylePreset || 'modern-dark'}
+- ${config?.darkMode ? 'DARK THEME: Rich dark backgrounds (#0a0a0f base), light text, colored glows and accent borders. NOT plain black — use subtle gradients and surface elevation.' : 'LIGHT THEME: Clean whites, subtle warm shadows, airy feel. NOT sterile — add warmth with off-white backgrounds and soft color tints.'}
+- Primary brand color: ${config?.primaryColor || '#3b82f6'} — build a full palette from this (light, dark, glow, muted variants)
+- ${config?.animations ? 'ANIMATIONS: CSS transitions on ALL interactive elements, @keyframes for scroll-triggered entrances (.animate-on-scroll → .is-visible), hover lift on cards, button press effects' : 'MINIMAL ANIMATIONS: only hover states and focus rings, no entrance animations'}
+- ${config?.responsive ? 'RESPONSIVE (mobile-first): base styles for mobile, @media (min-width: 768px) for tablet, @media (min-width: 1200px) for desktop' : 'DESKTOP-FIRST: optimize for 1200px+'}
+- Font: ${config?.fontPreference || 'sans-serif'}
 
-2. GLOBAL STYLES:
-   - CSS reset/normalize
-   - Body, typography defaults
-   - Link, button base styles
+CRITICAL QUALITY CHECKS:
+- Hero section: full viewport height, dramatic background (gradient or pattern), commanding headline size
+- Navigation: styled both default AND .is-scrolled AND .is-open (mobile) states
+- Every button: hover, focus-visible, and active states with transitions
+- Every card: subtle shadow + hover lift effect (translateY(-4px) + deeper shadow)
+- Section rhythm: alternating backgrounds to break up monotony
+- Text containers: max-width: 65ch for readability
+- Responsive: test mentally at 375px, 768px, 1440px — nothing should break
 
-3. SECTION STYLES — style EVERY section from the HTML:
-   - Hero section (always the most important — make it breathtaking)
-   - Navigation (sticky, with mobile hamburger states)
-   - All other sections from the brief
-   - Footer
+${config?.animations ? `ANIMATION CLASSES TO STYLE:
+- .animate-on-scroll { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease, transform 0.6s ease; }
+- .animate-on-scroll.is-visible { opacity: 1; transform: translateY(0); }
+- Stagger delays: .animate-on-scroll:nth-child(2) { transition-delay: 0.1s; } etc.` : ''}
 
-4. DESIGN DIRECTION:
-   - Preset: ${config?.stylePreset || 'modern-dark'}
-   - ${config?.darkMode ? 'DARK THEME — use dark backgrounds, light text, glows' : 'LIGHT THEME — clean, airy'}
-   - Primary brand color: ${config?.primaryColor || '#3b82f6'}
-   - ${config?.animations ? 'Add CSS animations: fade-in on scroll (use .is-visible class), hover transforms, smooth transitions' : 'Keep animations minimal'}
-   - ${config?.responsive ? 'MOBILE FIRST: start with mobile, add breakpoints at 768px and 1200px' : 'Desktop-optimized'}
+STATE CLASSES FROM MAJA'S JS (style all of these):
+- .is-open (mobile nav menu visible)
+- .is-scrolled (navbar background/shadow when scrolled)
+- .is-visible (scroll-triggered animation complete)
+- .is-invalid / .is-valid (form field validation states)
+- .is-hidden (hide-on-scroll navbar)
 
-5. After styling, MESSAGE @maja listing any class names you expect from the JS (like .nav--open, .is-visible) so she can add them in js/main.js
-6. MESSAGE @nova that CSS is ready for review
+After styling, MESSAGE @rex that CSS is complete and ready for QA.
+Also MESSAGE @maja if you need any HTML structure changes.
 
-Make it look like a premium agency built this. Be opinionated and bold.`
+The result should look like a $10,000+ agency project, not a free template.`
   )
 
   if (session.aborted) return
-  parseAgentResponse(session, 'stylist', stylistResponse)
+
+  if (stylistResponse) {
+    parseAgentResponse(session, 'stylist', stylistResponse)
+  } else {
+    logger.warn('Build', `Styling phase failed for session ${session.id.slice(0, 8)}, skipping`)
+    session.skippedPhases.push('CODING')
+    session.send('phase_skipped', { phase: 'CODING', reason: 'Stylist agent failed to respond' })
+  }
 
   session.setProgress(50, 'Styling applied')
   await sleep(600)
@@ -552,13 +1010,15 @@ Make it look like a premium agency built this. Be opinionated and bold.`
     session.pendingFeedback = []
     session.sendThinking('frontend-dev', `Got user feedback! Implementing changes: ${feedbackCtx}`)
 
-    const feedbackResponse = await callAgent(
+    const feedbackResponse = await callAgentWithRetry(
       session,
       frontendDev,
       `The user gave us feedback: "${feedbackCtx}".
 Update the relevant files to address this feedback. Be specific about what you're changing and why.`
     )
-    if (!session.aborted) parseAgentResponse(session, 'frontend-dev', feedbackResponse)
+    if (!session.aborted && feedbackResponse) {
+      parseAgentResponse(session, 'frontend-dev', feedbackResponse)
+    }
   }
 
   // ── PHASE 4: REVIEWING ──
@@ -567,7 +1027,7 @@ Update the relevant files to address this feedback. Be specific about what you'r
 
   session.sendThinking('reviewer', "Alright team — my turn. I'm going through every file with a fine-tooth comb. Let me start with the HTML structure, then CSS, then JS...")
 
-  const reviewResponse = await callAgent(
+  const reviewResponse = await callAgentWithRetry(
     session,
     reviewer,
     `You are doing a thorough code review of the complete website. Read every file carefully.
@@ -607,7 +1067,14 @@ Write a MESSAGE @leo with the top 2 CSS improvements needed.`
   )
 
   if (session.aborted) return
-  parseAgentResponse(session, 'reviewer', reviewResponse)
+
+  if (reviewResponse) {
+    parseAgentResponse(session, 'reviewer', reviewResponse)
+  } else {
+    logger.warn('Build', `Review phase failed for session ${session.id.slice(0, 8)}, skipping`)
+    session.skippedPhases.push('REVIEWING')
+    session.send('phase_skipped', { phase: 'REVIEWING', reason: 'Reviewer agent failed to respond' })
+  }
 
   session.setProgress(70, 'Review complete')
   await sleep(600)
@@ -619,7 +1086,7 @@ Write a MESSAGE @leo with the top 2 CSS improvements needed.`
   if (session.reviewComments.length > 0) {
     session.sendThinking('frontend-dev', `Nova flagged ${session.reviewComments.length} issues. Prioritizing them by severity and fixing everything...`)
 
-    const fixResponse = await callAgent(
+    const fixResponse = await callAgentWithRetry(
       session,
       frontendDev,
       `Nova (Code Reviewer) flagged these issues that need fixing:
@@ -630,7 +1097,9 @@ After fixing, MESSAGE @nova confirming what you fixed and flagging anything you 
 MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
     )
 
-    if (!session.aborted) parseAgentResponse(session, 'frontend-dev', fixResponse)
+    if (!session.aborted && fixResponse) {
+      parseAgentResponse(session, 'frontend-dev', fixResponse)
+    }
   } else {
     session.sendThinking('frontend-dev', "Nova's review came back clean — no major issues. Doing a final JS polish pass anyway...")
   }
@@ -638,28 +1107,33 @@ MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
   // Leo does final styling pass
   session.sendThinking('stylist', "Nova pointed out some CSS issues. Also doing my own final aesthetic pass — I want this to look perfect.")
 
-  const stylistPolish = await callAgent(
+  const stylistPolish = await callAgentWithRetry(
     session,
     stylist,
-    `Nova's review flagged some CSS issues. Fix them AND do a final design polish pass.
+    `Nova reviewed everything. Fix the issues AND do a final design polish.
 
 Nova's CSS feedback:
-${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues flagged — focus on polish)'}
+${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues — focus on polish)'}
 
-Your final polish checklist:
-1. Every interactive element has visible hover AND focus states
-2. Smooth transitions on all state changes (nav, buttons, cards)
-3. ${config?.responsive ? 'Verify mobile breakpoints — hero, nav, and grid all look good at 375px' : 'Fine-tune desktop layout'}
-4. Ensure visual hierarchy: headings, subheadings, body text, captions all have distinct sizes
-5. Add any micro-animations that will delight users (subtle, not distracting)
-6. Check that the primary color ${config?.primaryColor || '#3b82f6'} is used consistently and effectively
+FINAL POLISH CHECKLIST:
+1. HERO: Is it full-viewport? Does the headline command attention? Is there a gradient or visual interest in the background?
+2. HOVER STATES: Every button, card, and link has a visible hover effect with a smooth transition
+3. FOCUS STATES: Every interactive element has a visible focus-visible ring for keyboard users
+4. RESPONSIVE: Does the nav collapse properly at mobile? Do grids stack? Is text readable at 375px?
+5. VISUAL RHYTHM: Do sections alternate backgrounds? Is there consistent spacing between sections?
+6. TYPOGRAPHY: Are headings dramatically larger than body text? Is line-height comfortable?
+7. ANIMATIONS: Do .animate-on-scroll elements have proper initial state (opacity:0) and .is-visible transition?
+8. MOBILE NAV: Is the .is-open state styled? Does the hamburger menu look good?
+9. FORMS: Are .is-invalid and .is-valid states styled with clear visual feedback?
+10. MICRO-DETAILS: Subtle shadows, border-radius consistency, text-max-width for readability
 
-After updating, MESSAGE @rex that CSS is polished and ready for QA testing.
-
-Output the complete final css/styles.css.`
+Output the COMPLETE updated css/styles.css.
+After updating, MESSAGE @rex that design is polished.`
   )
 
-  if (!session.aborted) parseAgentResponse(session, 'stylist', stylistPolish)
+  if (!session.aborted && stylistPolish) {
+    parseAgentResponse(session, 'stylist', stylistPolish)
+  }
 
   session.setProgress(82, 'Fixes applied')
   await sleep(500)
@@ -670,7 +1144,7 @@ Output the complete final css/styles.css.`
 
   session.sendThinking('qa-tester', "Leo said it's ready. Let's see about that. Pulling out my QA checklist... I'm going to test EVERYTHING the brief asked for.")
 
-  const qaResponse = await callAgent(
+  const qaResponse = await callAgentWithRetry(
     session,
     qaTester,
     `You are doing final QA on the complete website build. Be thorough and methodical.
@@ -716,7 +1190,14 @@ If there are critical failures, MESSAGE @maja with specific fixes needed.`
   )
 
   if (session.aborted) return
-  parseAgentResponse(session, 'qa-tester', qaResponse)
+
+  if (qaResponse) {
+    parseAgentResponse(session, 'qa-tester', qaResponse)
+  } else {
+    logger.warn('Build', `QA phase failed for session ${session.id.slice(0, 8)}, skipping`)
+    session.skippedPhases.push('TESTING')
+    session.send('phase_skipped', { phase: 'TESTING', reason: 'QA tester agent failed to respond' })
+  }
 
   session.setProgress(92, 'QA complete')
   await sleep(500)
@@ -730,12 +1211,14 @@ If there are critical failures, MESSAGE @maja with specific fixes needed.`
     const feedbackCtx = session.pendingFeedback.join('. ')
     session.pendingFeedback = []
 
-    const lateFixResponse = await callAgent(
+    const lateFixResponse = await callAgentWithRetry(
       session,
       stylist,
       `Late user feedback: "${feedbackCtx}". Apply any visual/design changes requested. Update the relevant files.`
     )
-    if (!session.aborted) parseAgentResponse(session, 'stylist', lateFixResponse)
+    if (!session.aborted && lateFixResponse) {
+      parseAgentResponse(session, 'stylist', lateFixResponse)
+    }
   }
 
   session.sendMessage('architect', 'Project complete. Final review: all agents have signed off. The build is ready for delivery.', null)
@@ -748,15 +1231,25 @@ If there are critical failures, MESSAGE @maja with specific fixes needed.`
 
   session.updatePreview()
 
-  const summary = `Successfully built a ${session.config?.siteType || 'landing'} page with ${session.fs.files.size} files. The 5-agent team collaborated to create a responsive, polished website matching your brief.`
+  const skippedInfo = session.skippedPhases.length > 0
+    ? ` (${session.skippedPhases.length} phase(s) had agent failures and were skipped: ${session.skippedPhases.join(', ')})`
+    : ''
+
+  const tokenUsage = tokenTracker.getSessionUsage(session.id)
+  const summary = `Successfully built a ${session.config?.siteType || 'landing'} page with ${session.fs.files.size} files. The 5-agent team collaborated to create a responsive, polished website matching your brief.${skippedInfo}`
 
   session.send('build_complete', {
     files: session.fs.toArray(),
     summary,
     fileCount: session.fs.files.size,
+    skippedPhases: session.skippedPhases,
+    tokenUsage: tokenUsage?.total || null,
   })
 
-  console.log(`[Build:${session.id}] Complete — ${session.fs.files.size} files`)
+  logger.info('Build', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files`, {
+    skippedPhases: session.skippedPhases,
+    tokenUsage: tokenUsage?.total || {},
+  })
 }
 
 // ============================================================
@@ -772,16 +1265,31 @@ app.post('/api/suggest-config', async (req, res) => {
     const { brief } = req.body
     if (!brief) return res.status(400).json({ error: 'Brief required' })
 
-    const response = await deepseek.chat.completions.create({
-      model: 'deepseek-chat',
-      messages: [
-        {
-          role: 'system',
-          content: 'You are a senior web project analyst. Analyze website briefs and return JSON config suggestions. Return ONLY valid JSON with no markdown fences or extra text.',
-        },
-        {
-          role: 'user',
-          content: `Analyze this website brief and return a JSON config object.
+    // Validate brief length
+    const briefValidation = validateBrief(brief)
+    if (!briefValidation.valid) {
+      return res.status(400).json({ error: briefValidation.error })
+    }
+
+    // Check API key before making calls
+    if (!apiKeyValid) {
+      return res.status(503).json({ error: 'Server is not configured with a valid DeepSeek API key' })
+    }
+
+    // Retry logic for the suggest-config API call
+    let lastError = null
+    for (let attempt = 1; attempt <= API_RETRY_COUNT; attempt++) {
+      try {
+        const response = await deepseek.chat.completions.create({
+          model: 'deepseek-chat',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are a senior web project analyst. Analyze website briefs and return JSON config suggestions. Return ONLY valid JSON with no markdown fences or extra text.',
+            },
+            {
+              role: 'user',
+              content: `Analyze this website brief and return a JSON config object.
 
 BRIEF: "${brief}"
 
@@ -821,18 +1329,33 @@ Rules:
 - primaryColor: pick a hex color that fits the visual vibe described in the brief.
 - Be opinionated — pre-select the most sensible defaults.
 - Do not add generic questions like "What framework?" or "Mobile or desktop?".`,
-        },
-      ],
-      max_tokens: 2000,
-    })
+            },
+          ],
+          max_tokens: 2000,
+        })
 
-    const text = response.choices[0]?.message?.content || ''
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('No JSON in response')
-    const suggestions = JSON.parse(jsonMatch[0])
-    res.json(suggestions)
+        const text = response.choices?.[0]?.message?.content || ''
+        if (!text.trim()) {
+          throw new Error('Empty response from API')
+        }
+        const jsonMatch = text.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) throw new Error('No JSON in response')
+        const suggestions = JSON.parse(jsonMatch[0])
+        return res.json(suggestions)
+      } catch (err) {
+        lastError = err
+        if (attempt < API_RETRY_COUNT) {
+          const backoffMs = Math.pow(2, attempt) * 1000
+          logger.warn('SuggestConfig', `Attempt ${attempt}/${API_RETRY_COUNT} failed, retrying in ${backoffMs}ms`, { error: err.message })
+          await sleep(backoffMs)
+        }
+      }
+    }
+
+    logger.error('SuggestConfig', `All ${API_RETRY_COUNT} attempts failed`, { error: lastError?.message })
+    res.json({ suggestedConfig: {}, reasoning: '', customQuestions: [] })
   } catch (err) {
-    console.error('[SuggestConfig]', err.message)
+    logger.error('SuggestConfig', 'Unexpected error', { error: err.message })
     res.json({ suggestedConfig: {}, reasoning: '', customQuestions: [] })
   }
 })
@@ -845,15 +1368,54 @@ app.post('/api/download', async (req, res) => {
     }
     createZipBundle(files, res)
   } catch (err) {
-    console.error('[Download]', err)
+    logger.error('Download', 'Download failed', { error: err.message })
     res.status(500).json({ error: 'Download failed' })
   }
 })
 
 app.get('/api/health', (req, res) => {
+  const memUsage = process.memoryUsage()
+  const uptimeSeconds = Math.floor((Date.now() - serverStartTime) / 1000)
+
+  // Gather active session details
+  const activeSessionDetails = []
+  for (const [id, session] of sessions.entries()) {
+    activeSessionDetails.push({
+      id: id.slice(0, 8) + '...',
+      phase: session.phase,
+      progress: session.progressPercent,
+      aborted: session.aborted,
+      createdAt: new Date(session.createdAt).toISOString(),
+      lastActivity: new Date(session.lastActivity).toISOString(),
+      idleSeconds: Math.floor((Date.now() - session.lastActivity) / 1000),
+      fileCount: session.fs.files.size,
+      skippedPhases: session.skippedPhases,
+    })
+  }
+
   res.json({
     status: 'ok',
+    version: SERVER_VERSION,
+    uptime: {
+      seconds: uptimeSeconds,
+      human: formatUptime(uptimeSeconds),
+    },
+    apiKeyConfigured: apiKeyValid,
     activeSessions: sessions.size,
+    maxConcurrentBuilds: MAX_CONCURRENT_BUILDS,
+    sessions: activeSessionDetails,
+    memory: {
+      rss: formatBytes(memUsage.rss),
+      heapUsed: formatBytes(memUsage.heapUsed),
+      heapTotal: formatBytes(memUsage.heapTotal),
+      external: formatBytes(memUsage.external),
+    },
+    config: {
+      maxApiCallsPerMinute: MAX_API_CALLS_PER_MINUTE,
+      sessionTimeoutMinutes: SESSION_TIMEOUT_MS / 60000,
+      agentCallTimeoutSeconds: AGENT_CALL_TIMEOUT_MS / 1000,
+      apiRetryCount: API_RETRY_COUNT,
+    },
     timestamp: Date.now(),
   })
 })
@@ -865,11 +1427,17 @@ app.get('/api/health', (req, res) => {
 const PORT = process.env.PORT || 3001
 
 server.listen(PORT, () => {
-  console.log(`[Server] White Ninja AI running on port ${PORT}`)
-  console.log(`[Server] WS endpoint: ws://localhost:${PORT}/ws`)
-  if (!process.env.DEEPSEEK_API_KEY || process.env.DEEPSEEK_API_KEY === 'your_deepseek_api_key_here') {
-    console.warn('[Server] WARNING: DEEPSEEK_API_KEY not set — agent calls will fail')
+  logger.info('Server', `White Ninja AI v${SERVER_VERSION} running on port ${PORT}`)
+  logger.info('Server', `WS endpoint: ws://localhost:${PORT}/ws`)
+
+  if (!apiKeyValid) {
+    logger.warn('Server', 'DEEPSEEK_API_KEY not set or invalid -- agent calls will fail. Builds will be rejected until a valid key is provided.')
+  } else {
+    logger.info('Server', 'DEEPSEEK_API_KEY is configured')
   }
+
+  logger.info('Server', `Rate limits: max ${MAX_CONCURRENT_BUILDS} concurrent builds, ${MAX_API_CALLS_PER_MINUTE} API calls/min/session`)
+  logger.info('Server', `Session timeout: ${SESSION_TIMEOUT_MS / 60000} minutes, Agent timeout: ${AGENT_CALL_TIMEOUT_MS / 1000}s`)
 })
 
 // ============================================================
@@ -878,4 +1446,24 @@ server.listen(PORT, () => {
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B'
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i]
+}
+
+function formatUptime(seconds) {
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  const parts = []
+  if (days > 0) parts.push(`${days}d`)
+  if (hours > 0) parts.push(`${hours}h`)
+  if (minutes > 0) parts.push(`${minutes}m`)
+  parts.push(`${secs}s`)
+  return parts.join(' ')
 }

@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
+import { toast } from 'sonner'
 import WelcomeScreen from './screens/WelcomeScreen.jsx'
 import BriefScreen from './screens/BriefScreen.jsx'
 import ConfigScreen from './screens/ConfigScreen.jsx'
@@ -32,15 +33,15 @@ const DEFAULT_CONFIG = {
 }
 
 const pageVariants = {
-  initial: { opacity: 0, y: 20, filter: 'blur(4px)' },
+  initial: { opacity: 0, y: 20, filter: 'blur(6px)' },
   animate: { opacity: 1, y: 0, filter: 'blur(0px)' },
-  exit: { opacity: 0, y: -20, filter: 'blur(4px)' },
+  exit: { opacity: 0, y: -20, filter: 'blur(6px)' },
 }
 
 const pageTransition = {
   type: 'spring',
-  stiffness: 300,
-  damping: 30,
+  stiffness: 260,
+  damping: 25,
 }
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
   const [buildResult, setBuildResult] = useState(null)
   const [configSuggestions, setConfigSuggestions] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [buildStartTime, setBuildStartTime] = useState(null)
 
   const goToPhase = useCallback((nextPhase) => {
     setPhase(nextPhase)
@@ -59,19 +61,39 @@ export default function App() {
     setBrief(briefText)
     setIsAnalyzing(true)
     try {
-      const res = await fetch('http://localhost:3001/api/suggest-config', {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 30000)
+
+      const res = await fetch('/api/suggest-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brief: briefText }),
+        signal: controller.signal,
       })
+      clearTimeout(timeout)
+
+      if (!res.ok) {
+        throw new Error(`Server error: ${res.status}`)
+      }
+
       const suggestions = await res.json()
       setConfigSuggestions(suggestions)
+
       if (suggestions.suggestedConfig) {
         setConfig(prev => ({ ...prev, ...suggestions.suggestedConfig }))
+      }
+
+      if (suggestions.error) {
+        toast.warning('AI analysis partially failed — using defaults for some settings')
       }
     } catch (err) {
       console.error('Config suggestion failed:', err)
       setConfigSuggestions(null)
+      if (err.name === 'AbortError') {
+        toast.error('Analysis timed out — using default settings')
+      } else {
+        toast.error('Could not analyze brief — using default settings')
+      }
     } finally {
       setIsAnalyzing(false)
       setPhase(PHASES.CONFIG)
@@ -80,13 +102,15 @@ export default function App() {
 
   const handleConfigSubmit = useCallback((cfg) => {
     setConfig(cfg)
+    setBuildStartTime(Date.now())
     setPhase(PHASES.BUILDING)
   }, [])
 
   const handleBuildComplete = useCallback((result) => {
-    setBuildResult(result)
+    const buildTime = buildStartTime ? Math.round((Date.now() - buildStartTime) / 1000) : null
+    setBuildResult({ ...result, buildTime })
     setPhase(PHASES.REVIEW)
-  }, [])
+  }, [buildStartTime])
 
   const handleStartOver = useCallback(() => {
     setBrief('')
@@ -94,6 +118,7 @@ export default function App() {
     setBuildResult(null)
     setConfigSuggestions(null)
     setIsAnalyzing(false)
+    setBuildStartTime(null)
     setPhase(PHASES.WELCOME)
   }, [])
 
@@ -128,7 +153,7 @@ export default function App() {
           >
             <BriefScreen
               onSubmit={handleBriefSubmit}
-              onBack={() => goToPhase(PHASES.BRIEF)}
+              onBack={() => goToPhase(PHASES.WELCOME)}
               isAnalyzing={isAnalyzing}
             />
           </motion.div>
