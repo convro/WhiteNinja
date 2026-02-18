@@ -51,10 +51,18 @@ Your css/styles.css MUST follow this structure:
      --color-warning: #f59e0b;
      --color-error: #ef4444;
 
-     /* Typography Scale — use clamp() for fluid sizing */
-     --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+     /* Typography — these Google Fonts are pre-loaded in the preview:
+        Inter, Plus Jakarta Sans, DM Sans, Space Grotesk, Sora, Outfit, JetBrains Mono
+        Pick 1-2 fonts based on the project vibe. Examples:
+        - SaaS/startup: 'Plus Jakarta Sans' headings + 'Inter' body
+        - Tech/dev: 'Space Grotesk' headings + 'DM Sans' body
+        - Fintech/AI: 'Sora' headings + 'Inter' body
+        - Creative: 'Outfit' headings + 'DM Sans' body
+        - Corporate: 'Inter' headings + 'Inter' body (weight contrast)
+     */
+     --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
      --font-body: 'Inter', system-ui, -apple-system, sans-serif;
-     --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+     --font-mono: 'JetBrains Mono', monospace;
 
      --text-xs: clamp(0.75rem, 0.7rem + 0.25vw, 0.8rem);
      --text-sm: clamp(0.85rem, 0.8rem + 0.25vw, 0.9rem);
@@ -141,6 +149,15 @@ VISUAL QUALITY STANDARDS:
 - Letter spacing: -0.02em for large headings, normal for body
 - Color: primary color appears on CTAs, links, and accents — NOT on large background areas
 - Mobile: minimum tap target 44x44px, readable text without zooming
+
+LUCIDE ICONS STYLING:
+The HTML uses Lucide icons via <i data-lucide="icon-name"></i>.
+They render as inline SVGs. Style them with:
+- .lucide { width: 1em; height: 1em; } (default size, scales with font)
+- For feature cards: .feature-card .lucide { width: 2rem; height: 2rem; color: var(--color-primary); }
+- For buttons: .btn .lucide { width: 1.25em; height: 1.25em; margin-right: 0.5em; }
+- For nav: .nav .lucide { width: 1.25rem; height: 1.25rem; }
+Make sure Lucide icons inherit color properly and have proper vertical alignment.
 
 ANTI-PATTERNS TO AVOID:
 - DO NOT use generic system colors without a custom palette

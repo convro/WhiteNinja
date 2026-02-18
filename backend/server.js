@@ -7,6 +7,7 @@ import OpenAI from 'openai'
 import cors from 'cors'
 import { FileManager } from './builder/fileManager.js'
 import { getBaseTemplate } from './builder/templateEngine.js'
+import { formatImageCatalogForAgent } from './builder/imageCatalog.js'
 import { createZipBundle } from './builder/bundler.js'
 import { architect } from './agents/architect.js'
 import { frontendDev } from './agents/frontend-dev.js'
@@ -45,10 +46,11 @@ const logger = {
 
 const SERVER_VERSION = '0.2.0'
 const MAX_CONCURRENT_BUILDS = 3
-const MAX_API_CALLS_PER_MINUTE = 5
+const MAX_API_CALLS_PER_MINUTE = 10
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 const SESSION_CLEANUP_INTERVAL_MS = 60 * 1000 // check every minute
-const AGENT_CALL_TIMEOUT_MS = 60 * 1000 // 60 seconds per API call
+const AGENT_CALL_TIMEOUT_MS = 180 * 1000 // 180 seconds per API call (large outputs need more time)
+const AGENT_MAX_TOKENS = 64000 // DeepSeek Reasoner supports up to 64K output tokens
 const API_RETRY_COUNT = 3
 const BRIEF_MIN_LENGTH = 10
 const BRIEF_MAX_LENGTH = 5000
@@ -619,6 +621,9 @@ ${recentMsgs || 'No recent activity'}
 ## CURRENT FILES
 ${filesContext || 'No files yet'}
 
+## AVAILABLE IMAGES (use these real URLs in <img> tags!)
+${formatImageCatalogForAgent()}
+
 ${additionalContext ? `## ADDITIONAL CONTEXT\n${additionalContext}` : ''}
 
 ## YOUR TASK
@@ -640,7 +645,7 @@ Remember to use the output formats in your system prompt. Write complete, workin
       {
         model: 'deepseek-reasoner',
         messages,
-        max_tokens: 8000,
+        max_tokens: AGENT_MAX_TOKENS,
         stream: false,
         // Note: deepseek-reasoner does not support temperature parameter
       },
