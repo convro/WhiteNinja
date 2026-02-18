@@ -327,6 +327,7 @@ class BuildSession {
     this.fs.create(path, content, agentId)
     this.send('file_created', { path, content, agentId, reason })
     this.messages.push({ type: 'file_created', path, agentId })
+    this.updatePreview()
   }
 
   sendFileModified(path, content, agentId, reason = '') {
@@ -609,6 +610,9 @@ Dark mode site: ${session.config?.darkMode ? 'yes' : 'no'}
 ## ARCHITECT'S PLAN
 ${session.plan ? JSON.stringify(session.plan, null, 2) : 'Not yet created'}
 
+## DESIGN GUIDANCE
+${session.plan?.template?.designGuidance || ''}
+
 ## RECENT TEAM ACTIVITY
 ${recentMsgs || 'No recent activity'}
 
@@ -820,7 +824,7 @@ async function runBuild(session) {
   const planResponse = await callAgentWithRetry(
     session,
     architect,
-    `You are starting a new website project. Analyze this brief deeply and build the foundation.
+    `You are starting a new website project. Read the brief carefully and build a stunning foundation.
 
 USER BRIEF: "${session.brief}"
 
@@ -828,30 +832,39 @@ CONFIGURATION:
 - Site type: ${config?.siteType || 'landing'}
 - Style preset: ${config?.stylePreset || 'modern-dark'}
 - Primary color: ${config?.primaryColor || '#3b82f6'}
-- Dark mode site: ${config?.darkMode ? 'YES — build dark themed' : 'no'}
-- Animations: ${config?.animations ? 'YES — include them' : 'keep minimal'}
-- Responsive: ${config?.responsive ? 'YES — mobile-first' : 'desktop only'}
-- Code quality: ${config?.codeQuality || 'balanced'}
+- Dark mode site: ${config?.darkMode ? 'YES — dark backgrounds, light text, glowing accents' : 'LIGHT — clean whites, subtle shadows'}
+- Animations: ${config?.animations ? 'YES — scroll-triggered entrances, hover effects, smooth transitions' : 'keep minimal — only essential hover states'}
+- Responsive: ${config?.responsive ? 'YES — mobile-first, must work beautifully at 375px, 768px, 1440px' : 'desktop-optimized'}
 
-STEP 1 — THINK through the architecture:
-- What are the exact named sections this specific website needs? (e.g. HeroSection, PricingCards, TestimonialSlider)
-- What JavaScript interactions are needed? (forms, modals, scroll effects, etc.)
-- What unique visual elements does this brief require?
+STEP 1 — THINK through the project:
+- Who is the target audience? What do they care about?
+- What's the conversion goal? (sign up, buy, contact, hire, learn?)
+- What sections does this specific brief need? List them with purpose (e.g., "Pricing — 3 tiers to nudge users toward the mid tier")
+- What makes this project unique vs a generic template?
 
-STEP 2 — Create index.html with REAL content:
-- Write ALL the actual text content, headings, copy (don't use Lorem ipsum)
-- Include all sections from the brief with proper HTML5 semantics
-- Add descriptive class names that Leo can style (e.g. .hero__cta, .pricing-card--featured)
-- Link to css/styles.css and js/main.js
+STEP 2 — Create index.html with RICH, REAL content:
+- Write compelling, specific copy for every section — NOT generic "Welcome to our website" filler
+- Include ALL sections listed below with proper HTML5 semantics (<section>, <article>, <nav>, etc.)
+- Add descriptive BEM class names: .hero__headline, .pricing-card--featured, .testimonial__quote
+- Include proper <head> with meta tags, and link to css/styles.css and js/main.js
+- Add class="animate-on-scroll" to elements that should animate in on scroll
+- Use data-* attributes for JS hooks: data-nav-toggle, data-accordion-trigger, etc.
 
-STEP 3 — Brief the team:
-- MESSAGE @maja with specific JS tasks she needs to implement (list them by section)
-- MESSAGE @leo with the design direction, color palette intent, and which sections need special attention
+STEP 3 — Brief the team with SPECIFIC creative direction:
+- MESSAGE @maja listing every JS interaction: "1. Hamburger toggle on [data-nav-toggle] 2. Smooth scroll on a[href^='#'] 3. FAQ accordion on [data-accordion-trigger]..."
+- MESSAGE @leo with: specific color palette (hex values), typography mood (e.g., "bold modern sans-serif, tight letter-spacing on headlines"), visual references (e.g., "like Stripe's homepage but warmer"), which sections need special treatment
 
-Base template: ${template.description}
-Suggested sections: ${template.sections.join(', ')}
+TEMPLATE GUIDANCE:
+${template.description}
 
-Write complete, production-ready HTML with meaningful content from the brief.`
+REQUIRED SECTIONS (adapt to the brief):
+${template.sections.join('\n')}
+
+PLANNED FILES: ${template.files.join(', ')}
+
+${template.designGuidance || ''}
+
+Write complete, content-rich HTML. Every section should have enough real content that a client could read it and say "yes, this is my website."`
   )
 
   if (session.aborted) return
@@ -871,6 +884,7 @@ Write complete, production-ready HTML with meaningful content from the brief.`
     brief: session.brief,
     filesPlanned: template.files,
     sectionsPlanned: template.sections,
+    designGuidance: template.designGuidance || '',
   }
 
   session.setProgress(15, 'Planning complete')
@@ -885,20 +899,29 @@ Write complete, production-ready HTML with meaningful content from the brief.`
   const scaffoldResponse = await callAgentWithRetry(
     session,
     frontendDev,
-    `Kuba just finished the HTML structure. Your turn, Maja.
+    `Kuba finished the HTML. Your turn to make it interactive.
 
-Your tasks:
-1. READ index.html carefully — understand every section and class name Kuba used
-2. Create js/main.js with JavaScript for ALL interactive elements. This must include:
-   - Mobile navigation toggle (hamburger menu)
-   - Smooth scroll behavior for anchor links
-   - Any form validation mentioned in the brief
-   - Scroll-triggered animations if animations are enabled (${config?.animations ? 'YES, add them' : 'no'})
-   - Any specific interactions the brief mentions
-3. MESSAGE @leo telling him EXACTLY what class names you and Kuba used in the HTML, so he can write CSS that targets them correctly. List every major section class.
-4. MESSAGE @nova to confirm you've got the HTML structure documented for review
+READ index.html carefully — note every section, class name, and data-* attribute.
 
-After finishing, MESSAGE @kuba confirming what you built and any structural concerns.
+Create js/main.js with ALL of this:
+
+1. MOBILE NAV: hamburger toggle on [data-nav-toggle], close on link click, close on outside click, close on Escape key
+2. SMOOTH SCROLL: all a[href^="#"] links scroll smoothly to their target
+3. STICKY NAVBAR: add .is-scrolled class when scrolled > 50px
+4. SCROLL ANIMATIONS: IntersectionObserver that adds .is-visible to all .animate-on-scroll elements
+${config?.animations ? '5. COUNTER ANIMATION: animate number counters when they scroll into view' : ''}
+6. FAQ ACCORDION: if there are [data-accordion-trigger] elements, make them toggle .is-open on parent [data-accordion-item]
+7. FORM VALIDATION: if there's a form, validate on submit with inline error messages (not alert)
+8. Any specific interactions mentioned in the brief or in Kuba's messages to you
+
+ALSO create js/animations.js if animations are enabled (${config?.animations ? 'YES' : 'no'}):
+- Scroll-triggered entrance animations using IntersectionObserver
+- Parallax effect on hero if applicable
+- Staggered animation on card grids
+
+After writing code:
+- MESSAGE @leo listing ALL state classes you're toggling: .is-open, .is-visible, .is-scrolled, .is-invalid, .is-valid, etc. — he needs to write CSS for ALL of these
+- MESSAGE @nova that JS is ready for review
 
 The brief: "${session.brief.slice(0, 200)}"`
   )
@@ -926,40 +949,46 @@ The brief: "${session.brief.slice(0, 200)}"`
   const stylistResponse = await callAgentWithRetry(
     session,
     stylist,
-    `Maja and Kuba have built the HTML structure. Now it's your turn to make it look stunning.
+    `Kuba and Maja have built the HTML and JS. Now make this look INCREDIBLE.
 
-READ all existing files carefully, especially every class name and section in index.html.
+READ index.html carefully — note every section, every class name, every element.
+READ the messages from Kuba and Maja — they'll tell you the design direction and JS state classes.
 
-Create css/styles.css with a COMPLETE, professional design system:
+Create css/styles.css following the DESIGN SYSTEM STRUCTURE from your system prompt. This must be COMPLETE — every section styled, every interactive state handled.
 
-1. CSS VARIABLES (design tokens):
-   - Color palette: primary ${config?.primaryColor || '#3b82f6'}, backgrounds, surfaces, text colors
-   - Typography scale: font sizes, weights, line heights
-   - Spacing system: consistent gap/padding values
-   - Border radius, shadows, transitions
+DESIGN PARAMETERS:
+- Style preset: ${config?.stylePreset || 'modern-dark'}
+- ${config?.darkMode ? 'DARK THEME: Rich dark backgrounds (#0a0a0f base), light text, colored glows and accent borders. NOT plain black — use subtle gradients and surface elevation.' : 'LIGHT THEME: Clean whites, subtle warm shadows, airy feel. NOT sterile — add warmth with off-white backgrounds and soft color tints.'}
+- Primary brand color: ${config?.primaryColor || '#3b82f6'} — build a full palette from this (light, dark, glow, muted variants)
+- ${config?.animations ? 'ANIMATIONS: CSS transitions on ALL interactive elements, @keyframes for scroll-triggered entrances (.animate-on-scroll → .is-visible), hover lift on cards, button press effects' : 'MINIMAL ANIMATIONS: only hover states and focus rings, no entrance animations'}
+- ${config?.responsive ? 'RESPONSIVE (mobile-first): base styles for mobile, @media (min-width: 768px) for tablet, @media (min-width: 1200px) for desktop' : 'DESKTOP-FIRST: optimize for 1200px+'}
+- Font: ${config?.fontPreference || 'sans-serif'}
 
-2. GLOBAL STYLES:
-   - CSS reset/normalize
-   - Body, typography defaults
-   - Link, button base styles
+CRITICAL QUALITY CHECKS:
+- Hero section: full viewport height, dramatic background (gradient or pattern), commanding headline size
+- Navigation: styled both default AND .is-scrolled AND .is-open (mobile) states
+- Every button: hover, focus-visible, and active states with transitions
+- Every card: subtle shadow + hover lift effect (translateY(-4px) + deeper shadow)
+- Section rhythm: alternating backgrounds to break up monotony
+- Text containers: max-width: 65ch for readability
+- Responsive: test mentally at 375px, 768px, 1440px — nothing should break
 
-3. SECTION STYLES — style EVERY section from the HTML:
-   - Hero section (always the most important — make it breathtaking)
-   - Navigation (sticky, with mobile hamburger states)
-   - All other sections from the brief
-   - Footer
+${config?.animations ? `ANIMATION CLASSES TO STYLE:
+- .animate-on-scroll { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease, transform 0.6s ease; }
+- .animate-on-scroll.is-visible { opacity: 1; transform: translateY(0); }
+- Stagger delays: .animate-on-scroll:nth-child(2) { transition-delay: 0.1s; } etc.` : ''}
 
-4. DESIGN DIRECTION:
-   - Preset: ${config?.stylePreset || 'modern-dark'}
-   - ${config?.darkMode ? 'DARK THEME — use dark backgrounds, light text, glows' : 'LIGHT THEME — clean, airy'}
-   - Primary brand color: ${config?.primaryColor || '#3b82f6'}
-   - ${config?.animations ? 'Add CSS animations: fade-in on scroll (use .is-visible class), hover transforms, smooth transitions' : 'Keep animations minimal'}
-   - ${config?.responsive ? 'MOBILE FIRST: start with mobile, add breakpoints at 768px and 1200px' : 'Desktop-optimized'}
+STATE CLASSES FROM MAJA'S JS (style all of these):
+- .is-open (mobile nav menu visible)
+- .is-scrolled (navbar background/shadow when scrolled)
+- .is-visible (scroll-triggered animation complete)
+- .is-invalid / .is-valid (form field validation states)
+- .is-hidden (hide-on-scroll navbar)
 
-5. After styling, MESSAGE @maja listing any class names you expect from the JS (like .nav--open, .is-visible) so she can add them in js/main.js
-6. MESSAGE @nova that CSS is ready for review
+After styling, MESSAGE @rex that CSS is complete and ready for QA.
+Also MESSAGE @maja if you need any HTML structure changes.
 
-Make it look like a premium agency built this. Be opinionated and bold.`
+The result should look like a $10,000+ agency project, not a free template.`
   )
 
   if (session.aborted) return
@@ -1081,22 +1110,25 @@ MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
   const stylistPolish = await callAgentWithRetry(
     session,
     stylist,
-    `Nova's review flagged some CSS issues. Fix them AND do a final design polish pass.
+    `Nova reviewed everything. Fix the issues AND do a final design polish.
 
 Nova's CSS feedback:
-${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues flagged — focus on polish)'}
+${session.reviewComments.filter(c => c.file?.includes('.css')).map(c => `- ${c.comment}`).join('\n') || '(No specific CSS issues — focus on polish)'}
 
-Your final polish checklist:
-1. Every interactive element has visible hover AND focus states
-2. Smooth transitions on all state changes (nav, buttons, cards)
-3. ${config?.responsive ? 'Verify mobile breakpoints — hero, nav, and grid all look good at 375px' : 'Fine-tune desktop layout'}
-4. Ensure visual hierarchy: headings, subheadings, body text, captions all have distinct sizes
-5. Add any micro-animations that will delight users (subtle, not distracting)
-6. Check that the primary color ${config?.primaryColor || '#3b82f6'} is used consistently and effectively
+FINAL POLISH CHECKLIST:
+1. HERO: Is it full-viewport? Does the headline command attention? Is there a gradient or visual interest in the background?
+2. HOVER STATES: Every button, card, and link has a visible hover effect with a smooth transition
+3. FOCUS STATES: Every interactive element has a visible focus-visible ring for keyboard users
+4. RESPONSIVE: Does the nav collapse properly at mobile? Do grids stack? Is text readable at 375px?
+5. VISUAL RHYTHM: Do sections alternate backgrounds? Is there consistent spacing between sections?
+6. TYPOGRAPHY: Are headings dramatically larger than body text? Is line-height comfortable?
+7. ANIMATIONS: Do .animate-on-scroll elements have proper initial state (opacity:0) and .is-visible transition?
+8. MOBILE NAV: Is the .is-open state styled? Does the hamburger menu look good?
+9. FORMS: Are .is-invalid and .is-valid states styled with clear visual feedback?
+10. MICRO-DETAILS: Subtle shadows, border-radius consistency, text-max-width for readability
 
-After updating, MESSAGE @rex that CSS is polished and ready for QA testing.
-
-Output the complete final css/styles.css.`
+Output the COMPLETE updated css/styles.css.
+After updating, MESSAGE @rex that design is polished.`
   )
 
   if (!session.aborted && stylistPolish) {

@@ -126,7 +126,9 @@ export class FileManager {
   }
 
   /**
-   * Build a combined HTML preview (srcdoc)
+   * Build a combined HTML preview (srcdoc).
+   * Extracts body content from full HTML documents to avoid nesting
+   * <!DOCTYPE> inside another <!DOCTYPE> in the iframe srcdoc.
    */
   buildPreview() {
     const htmlFile = this.getAll().find(f =>
@@ -140,8 +142,37 @@ export class FileManager {
       return { html: html.html, css: html.css, js: '' }
     }
 
-    const html = htmlFile.content || ''
-    const css = cssFiles.map(f => f.content).join('\n')
+    let html = htmlFile.content || ''
+
+    // Extract body content if the HTML is a full document.
+    // The agent writes complete HTML files with <!DOCTYPE>, <html>, <head>, etc.
+    // We need just the <body> innerHTML for the srcdoc wrapper.
+    const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+    if (bodyMatch) {
+      html = bodyMatch[1].trim()
+    } else if (html.includes('<!DOCTYPE') || html.includes('<html')) {
+      // Has doctype/html but no body tags — strip head/html wrappers
+      html = html
+        .replace(/<!DOCTYPE[^>]*>/i, '')
+        .replace(/<\/?html[^>]*>/gi, '')
+        .replace(/<head[\s\S]*?<\/head>/i, '')
+        .trim()
+    }
+
+    // Also extract any inline <style> blocks from the HTML and prepend to CSS
+    let inlineCss = ''
+    const styleMatches = (htmlFile.content || '').matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)
+    for (const m of styleMatches) {
+      inlineCss += m[1] + '\n'
+    }
+    // Remove <style> tags from extracted body
+    html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    // Remove <script> tags from extracted body (we inject JS separately)
+    html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    // Remove <link rel="stylesheet"> (CSS is injected via srcdoc <style>)
+    html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '')
+
+    const css = inlineCss + cssFiles.map(f => f.content).join('\n')
     const js = jsFiles.map(f => f.content).join('\n')
 
     return { html, css, js }
