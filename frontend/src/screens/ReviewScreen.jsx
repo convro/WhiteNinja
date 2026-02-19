@@ -13,6 +13,10 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
     ? `${window.location.origin}${previewUrl}`
     : null
 
+  if (!previewUrl) {
+    console.warn('[ReviewScreen] previewUrl is missing from build result:', { resultKeys: result ? Object.keys(result) : 'null', previewUrl: result?.previewUrl })
+  }
+
   const handleCopyLink = async () => {
     if (!fullPreviewUrl) return
     try {
@@ -112,17 +116,17 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
         </div>
 
         {/* Shareable Link */}
-        {fullPreviewUrl && (
-          <motion.div
-            className="review-share"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <div className="review-section-label">
-              Live Preview
-              <span className="review-share-badge">shareable</span>
-            </div>
+        <motion.div
+          className="review-share"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+        >
+          <div className="review-section-label">
+            Live Preview
+            {fullPreviewUrl && <span className="review-share-badge">shareable</span>}
+          </div>
+          {fullPreviewUrl ? (
             <div className="review-share-row">
               <code className="review-share-url">{fullPreviewUrl}</code>
               <button className="btn btn-sm btn-ghost review-share-copy" onClick={handleCopyLink}>
@@ -138,8 +142,12 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
                 Open
               </a>
             </div>
-          </motion.div>
-        )}
+          ) : (
+            <p className="review-share-unavailable">
+              Preview link unavailable — download the ZIP below to view locally.
+            </p>
+          )}
+        </motion.div>
 
         {/* Actions */}
         <div className="review-actions">
@@ -152,6 +160,20 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
             <Download size={16} />
             Download ZIP
           </motion.button>
+
+          {fullPreviewUrl && (
+            <motion.a
+              className="btn btn-secondary review-open-btn"
+              href={fullPreviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <ExternalLink size={16} />
+              Open Live Preview
+            </motion.a>
+          )}
 
           <motion.button
             className="btn btn-secondary"
