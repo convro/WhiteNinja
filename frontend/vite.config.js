@@ -15,6 +15,10 @@ export default defineConfig({
       '/api': {
         target: `http://localhost:${BACKEND_PORT}`,
         changeOrigin: true,
+      },
+      '/test-builds': {
+        target: `http://localhost:${BACKEND_PORT}`,
+        changeOrigin: true,
       }
     }
   }

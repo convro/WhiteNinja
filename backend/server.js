@@ -5,6 +5,9 @@ import { WebSocketServer, WebSocket } from 'ws'
 import { v4 as uuidv4 } from 'uuid'
 import OpenAI from 'openai'
 import cors from 'cors'
+import { mkdir, writeFile, rm, readdir, stat } from 'fs/promises'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { FileManager } from './builder/fileManager.js'
 import { getBaseTemplate } from './builder/templateEngine.js'
 import { formatImageCatalogForAgent } from './builder/imageCatalog.js'
@@ -54,6 +57,8 @@ const AGENT_MAX_TOKENS = 64000 // DeepSeek Reasoner supports up to 64K output to
 const API_RETRY_COUNT = 3
 const BRIEF_MIN_LENGTH = 10
 const BRIEF_MAX_LENGTH = 5000
+const TEST_BUILDS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'test-builds')
+const TEST_BUILDS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 const serverStartTime = Date.now()
 
@@ -81,6 +86,7 @@ const wss = new WebSocketServer({ server, path: '/ws' })
 
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
+app.use('/test-builds', express.static(TEST_BUILDS_DIR))
 
 // DeepSeek client via OpenAI SDK
 const deepseek = new OpenAI({
@@ -210,7 +216,10 @@ function cleanupStaleSessions() {
   }
 }
 
-const cleanupInterval = setInterval(cleanupStaleSessions, SESSION_CLEANUP_INTERVAL_MS)
+const cleanupInterval = setInterval(() => {
+  cleanupStaleSessions()
+  cleanupOldBuilds()
+}, SESSION_CLEANUP_INTERVAL_MS)
 
 // Allow the process to exit cleanly
 cleanupInterval.unref()
@@ -799,6 +808,47 @@ function resolveAgentId(name) {
     rex: 'qa-tester', 'qa-tester': 'qa-tester', qa: 'qa-tester',
   }
   return map[name.toLowerCase()] || name
+}
+
+// ============================================================
+// SAVE BUILD TO DISK (for shareable preview links)
+// ============================================================
+
+async function saveBuildToDisk(session) {
+  const buildDir = join(TEST_BUILDS_DIR, session.id)
+  try {
+    const files = session.getAllFiles()
+    if (files.length === 0) return null
+
+    for (const file of files) {
+      const filePath = join(buildDir, file.path)
+      await mkdir(dirname(filePath), { recursive: true })
+      await writeFile(filePath, file.content || '', 'utf8')
+    }
+
+    logger.info('TestBuilds', `Saved ${files.length} files to disk for session ${session.id.slice(0, 8)}`)
+    return `/test-builds/${session.id}/`
+  } catch (err) {
+    logger.error('TestBuilds', `Failed to save build to disk for session ${session.id.slice(0, 8)}`, { error: err.message })
+    return null
+  }
+}
+
+async function cleanupOldBuilds() {
+  try {
+    const entries = await readdir(TEST_BUILDS_DIR).catch(() => [])
+    const now = Date.now()
+    for (const entry of entries) {
+      const entryPath = join(TEST_BUILDS_DIR, entry)
+      const s = await stat(entryPath).catch(() => null)
+      if (s && s.isDirectory() && (now - s.mtimeMs) > TEST_BUILDS_MAX_AGE_MS) {
+        await rm(entryPath, { recursive: true, force: true })
+        logger.info('TestBuilds', `Cleaned up old build: ${entry.slice(0, 8)}`)
+      }
+    }
+  } catch (err) {
+    logger.error('TestBuilds', 'Cleanup failed', { error: err.message })
+  }
 }
 
 // ============================================================
@@ -1392,6 +1442,9 @@ ${currentHtmlForPolish.slice(0, 4000)}`
 
   session.updatePreview()
 
+  // Save build files to disk for shareable preview link
+  const previewUrl = await saveBuildToDisk(session)
+
   const skippedInfo = session.skippedPhases.length > 0
     ? ` (${session.skippedPhases.length} phase(s) had agent failures and were skipped: ${session.skippedPhases.join(', ')})`
     : ''
@@ -1406,6 +1459,7 @@ ${currentHtmlForPolish.slice(0, 4000)}`
     skippedPhases: session.skippedPhases,
     qaRounds: qaRound,
     tokenUsage: tokenUsage?.total || null,
+    previewUrl: previewUrl || null,
   })
 
   logger.info('Build', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files, ${qaRound} QA rounds`, {
@@ -1588,9 +1642,16 @@ app.get('/api/health', (req, res) => {
 
 const PORT = process.env.PORT || 3001
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   logger.info('Server', `White Ninja AI v${SERVER_VERSION} running on port ${PORT}`)
   logger.info('Server', `WS endpoint: ws://localhost:${PORT}/ws`)
+
+  // Ensure test-builds directory exists
+  await mkdir(TEST_BUILDS_DIR, { recursive: true }).catch(() => {})
+  logger.info('Server', `Test builds served at /test-builds/`)
+
+  // Clean up old builds on startup
+  cleanupOldBuilds()
 
   if (!apiKeyValid) {
     logger.warn('Server', 'DEEPSEEK_API_KEY not set or invalid -- agent calls will fail. Builds will be rejected until a valid key is provided.')
