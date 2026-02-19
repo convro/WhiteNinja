@@ -91,9 +91,22 @@ function MockFeed() {
 export default function WelcomeScreen({ onStart }) {
   return (
     <div className="welcome-screen">
-      <div className="welcome-bg-grid" />
-      <div className="welcome-orb welcome-orb--blue" />
-      <div className="welcome-orb welcome-orb--purple" />
+      {/* ── GENIE LAMP BACKGROUND ── */}
+      <div className="wn-genie-bg">
+        <div className="wn-blob wn-b1"></div>
+        <div className="wn-blob wn-b2"></div>
+        <div className="wn-blob wn-b3"></div>
+        <div className="wn-blob wn-b4"></div>
+        <div className="wn-blob wn-b5"></div>
+        <div className="wn-pulse wn-p1"></div>
+        <div className="wn-pulse wn-p2"></div>
+        <div className="wn-pulse wn-p3"></div>
+        <div className="wn-spark wn-s1"></div>
+        <div className="wn-spark wn-s2"></div>
+        <div className="wn-spark wn-s3"></div>
+        <div className="wn-spark wn-s4"></div>
+        <div className="wn-genie-overlay"></div>
+      </div>
 
       <div className="welcome-layout">
         {/* ── LEFT COLUMN ── */}
