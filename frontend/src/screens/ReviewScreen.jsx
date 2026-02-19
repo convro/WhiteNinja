@@ -1,10 +1,29 @@
+import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Download, RotateCcw, CheckCircle, FileCode, ExternalLink } from 'lucide-react'
+import { Download, RotateCcw, CheckCircle, FileCode, ExternalLink, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import './ReviewScreen.css'
 
 export default function ReviewScreen({ result, brief, onStartOver }) {
   const files = result?.files || []
+  const previewUrl = result?.previewUrl || null
+  const [copied, setCopied] = useState(false)
+
+  const fullPreviewUrl = previewUrl
+    ? `${window.location.origin}${previewUrl}`
+    : null
+
+  const handleCopyLink = async () => {
+    if (!fullPreviewUrl) return
+    try {
+      await navigator.clipboard.writeText(fullPreviewUrl)
+      setCopied(true)
+      toast.success('Link copied!')
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      toast.error('Failed to copy')
+    }
+  }
 
   const handleDownload = async () => {
     try {
@@ -91,6 +110,36 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
             ))}
           </div>
         </div>
+
+        {/* Shareable Link */}
+        {fullPreviewUrl && (
+          <motion.div
+            className="review-share"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+          >
+            <div className="review-section-label">
+              Live Preview
+              <span className="review-share-badge">shareable</span>
+            </div>
+            <div className="review-share-row">
+              <code className="review-share-url">{fullPreviewUrl}</code>
+              <button className="btn btn-sm btn-ghost review-share-copy" onClick={handleCopyLink}>
+                {copied ? <Check size={14} /> : <Copy size={14} />}
+              </button>
+              <a
+                className="btn btn-sm btn-secondary review-share-open"
+                href={fullPreviewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <ExternalLink size={14} />
+                Open
+              </a>
+            </div>
+          </motion.div>
+        )}
 
         {/* Actions */}
         <div className="review-actions">
