@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { toast } from 'sonner'
-import { Send, Pause, Play, Home, Wifi, WifiOff } from 'lucide-react'
+import { Send, Pause, Play, Home, Wifi, WifiOff, AlertTriangle, RotateCcw } from 'lucide-react'
 import { useBuilderSocket } from '../hooks/useBuilderSocket.jsx'
 import { useFileSystem } from '../hooks/useFileSystem.jsx'
 import AgentFeed from '../components/AgentFeed.jsx'
@@ -90,6 +90,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
   const [feedback, setFeedback] = useState('')
   const [activePanel, setActivePanel] = useState('feed')
   const [buildStarted, setBuildStarted] = useState(false)
+  const [buildError, setBuildError] = useState(null)
 
   const msgIdRef = useRef(0)
   const addMsg = useCallback((msg) => {
@@ -147,17 +148,67 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
         toast.success('Build complete!', { duration: 3000 })
         setTimeout(() => onComplete(msg), 2000)
       }),
+
+      socket.on('build_error', (msg) => {
+        const errorMessage = msg.message || 'Build failed — unknown error'
+        setBuildError(errorMessage)
+        setBuildPhase('ERROR')
+        addMsg({ type: 'agent_message', agentId: 'system', message: `Build error: ${errorMessage}` })
+        toast.error(errorMessage, { duration: 8000 })
+      }),
+
+      socket.on('agent_error', (msg) => {
+        addMsg({ type: 'agent_message', agentId: msg.agentId || 'system', message: `Agent failed: ${msg.message || 'unknown error'}` })
+        toast.warning(`Agent ${msg.agentId || 'unknown'} failed — build will try to continue`, { duration: 5000 })
+      }),
+
+      socket.on('phase_skipped', (msg) => {
+        addMsg({ type: 'agent_message', agentId: 'system', message: `Phase ${msg.phase} skipped: ${msg.reason || 'agent failure'}` })
+        toast.warning(`Phase ${msg.phase} was skipped`, { duration: 4000 })
+      }),
     ]
 
     return () => offs.forEach(off => off && off())
   }, [socket, fs, addMsg, onComplete])
 
+  const prevConnectionRef = useRef(socket.connectionState)
+
   useEffect(() => {
-    if (socket.connectionState === 'connected' && !buildStarted) {
+    const prev = prevConnectionRef.current
+    const curr = socket.connectionState
+    prevConnectionRef.current = curr
+
+    // First connect: start the build
+    if (curr === 'connected' && !buildStarted) {
       setBuildStarted(true)
+      setBuildError(null)
       socket.startBuild(brief, config)
+      return
     }
-  }, [socket.connectionState, buildStarted, socket, brief, config])
+
+    // Reconnect after disconnect: backend aborted the old session, restart
+    if (curr === 'connected' && buildStarted && prev !== 'connected' && buildPhase !== 'COMPLETE') {
+      setBuildError(null)
+      setBuildProgress(0)
+      setBuildPhase('PLANNING')
+      setMessages([])
+      socket.startBuild(brief, config)
+      toast('Reconnected — restarting build', { duration: 3000 })
+      return
+    }
+
+    // Connection lost during active build
+    if (curr === 'disconnected' && prev === 'connected' && buildPhase !== 'COMPLETE') {
+      toast.warning('Connection lost — attempting to reconnect...', { duration: 4000 })
+    }
+
+    // All retries exhausted
+    if (curr === 'failed') {
+      setBuildError('Lost connection to server. Please check your network and try again.')
+      setBuildPhase('ERROR')
+      toast.error('Connection failed — could not reach the server', { duration: 8000 })
+    }
+  }, [socket.connectionState, buildStarted, socket, brief, config, buildPhase])
 
   const handleSendFeedback = useCallback(() => {
     if (!feedback.trim()) return
@@ -280,6 +331,46 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
         {/* Floating realtime activity log — bottom-left */}
         <ActivityLog messages={messages} />
       </div>
+
+      {/* Error overlay */}
+      <AnimatePresence>
+        {buildError && buildPhase === 'ERROR' && (
+          <motion.div
+            className="build-error-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <div className="build-error-card">
+              <AlertTriangle size={32} className="build-error-icon" />
+              <h3>Build Failed</h3>
+              <p className="build-error-message">{buildError}</p>
+              <div className="build-error-actions">
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => {
+                    setBuildError(null)
+                    setBuildStarted(false)
+                    setBuildPhase('PLANNING')
+                    setBuildProgress(0)
+                    setMessages([])
+                    if (socket.connectionState === 'failed') {
+                      socket.retryConnection()
+                    }
+                  }}
+                >
+                  <RotateCcw size={13} />
+                  Retry Build
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={onStartOver}>
+                  <Home size={13} />
+                  Start Over
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
