@@ -394,7 +394,7 @@
 
 .welcome-subtitle {
   font-size: 1rem;
-  color: var(--text-secondary);
+  color: #b0bac8;
   line-height: 1.7;
   max-width: 440px;
 }
@@ -518,11 +518,11 @@
   align-items: center;
   gap: var(--space-3);
   font-size: 13px;
-  color: var(--text-secondary);
+  color: #a0adb8;
 }
 
 .welcome-feature-icon {
-  color: var(--accent);
+  color: #8b5cf6;
   flex-shrink: 0;
 }
 
@@ -596,7 +596,7 @@
 
 .welcome-cta-note {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: #7a8a9a;
 }
 
 /* ── Right column: Mock feed ── */

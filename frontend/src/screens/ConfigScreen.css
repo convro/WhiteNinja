@@ -6,7 +6,8 @@
   align-items: flex-start;
   justify-content: center;
   position: relative;
-  padding: var(--space-8) var(--space-6);
+  padding: var(--space-12) var(--space-6);
+  -webkit-overflow-scrolling: touch;
 }
 
 .config-orb--purple {
@@ -215,7 +216,7 @@
 
 .config-slider-desc {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .config-range {
@@ -283,7 +284,7 @@
 }
 .config-quality-desc {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Toggles */
@@ -315,7 +316,7 @@
 
 .config-toggle-desc {
   font-size: 12px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .config-toggle-switch {
@@ -495,7 +496,7 @@
 
 .config-custom-opt-desc {
   font-size: 11px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 /* Analyzing overlay on BriefScreen */
@@ -542,4 +543,30 @@
   color: var(--text-tertiary);
   max-width: 260px;
   line-height: 1.5;
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+  .config-screen {
+    padding: var(--space-8) var(--space-4);
+  }
+  .config-site-types {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .config-quality-opts {
+    grid-template-columns: 1fr;
+  }
+  .config-presets {
+    flex-direction: column;
+  }
+  .config-preset-btn {
+    flex-direction: row;
+    min-width: auto;
+  }
+  .config-title h2 {
+    font-size: 1.4rem;
+  }
+  .config-container {
+    padding-bottom: var(--space-16);
+  }
 }

@@ -78,12 +78,12 @@
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 
 .build-progress-phase.done .build-progress-phase-label {
   color: var(--accent);
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 .build-progress-phase.active .build-progress-phase-label {

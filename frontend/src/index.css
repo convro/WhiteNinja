@@ -21,20 +21,20 @@ html {
 /* === CSS Variables === */
 :root {
   /* Backgrounds — deeper blacks with blue/purple undertones */
-  --bg-primary: #06060c;
-  --bg-secondary: #0a0c14;
-  --bg-elevated: #0f1120;
-  --bg-card: #141728;
-  --bg-hover: #1a1e34;
-  --bg-sunken: #040408;
+  --bg-primary: #070810;
+  --bg-secondary: #0b0d16;
+  --bg-elevated: #111322;
+  --bg-card: #15182b;
+  --bg-hover: #1c2038;
+  --bg-sunken: #04050a;
   --bg-overlay: rgba(4, 4, 8, 0.8);
   --bg-frosted: rgba(10, 12, 20, 0.6);
 
   /* Text */
   --text-primary: #edf2f7;
-  --text-secondary: #8b98a8;
-  --text-tertiary: #475569;
-  --text-muted: #2d3748;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --text-muted: #334155;
   --text-bright: #f8fafc;
   --text-link: #60a5fa;
 
@@ -85,10 +85,10 @@ html {
   --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
 
   /* Borders */
-  --border-subtle: 1px solid rgba(255, 255, 255, 0.06);
-  --border-muted: 1px solid rgba(255, 255, 255, 0.04);
+  --border-subtle: 1px solid rgba(255, 255, 255, 0.08);
+  --border-muted: 1px solid rgba(255, 255, 255, 0.05);
   --border-accent: 1px solid rgba(59, 130, 246, 0.3);
-  --border-strong: 1px solid rgba(255, 255, 255, 0.1);
+  --border-strong: 1px solid rgba(255, 255, 255, 0.12);
   --border-glow: 1px solid rgba(59, 130, 246, 0.2);
 
   /* Glass */
@@ -245,23 +245,23 @@ a:hover {
 .tracking-wide   { letter-spacing: 0.05em; }
 .tracking-wider  { letter-spacing: 0.1em; }
 
-/* === Scrollbar — barely visible, refined on hover === */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* === Scrollbar — visible enough to be usable === */
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.10);
   border-radius: var(--radius-full);
   transition: background 0.3s ease;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.22);
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.04) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
 }
 *:hover {
-  scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
 }
 
 /* === Glassmorphism System === */

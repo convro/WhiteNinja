@@ -310,6 +310,8 @@
 
   .build-panel.mobile-active {
     display: flex;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .build-topbar-center { display: none; }
