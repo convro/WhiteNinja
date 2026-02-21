@@ -3,7 +3,7 @@ import { Monitor, Tablet, Smartphone, Code2, RefreshCw, Eye } from 'lucide-react
 import './LivePreview.css'
 
 const VIEWPORTS = [
-  { id: 'desktop', icon: Monitor, label: 'Desktop', width: '100%', px: null },
+  { id: 'desktop', icon: Monitor, label: 'Desktop', width: '1280px', px: 1280, scale: true },
   { id: 'tablet', icon: Tablet, label: 'Tablet', width: '768px', px: 768 },
   { id: 'mobile', icon: Smartphone, label: 'Mobile', width: '390px', px: 390 },
 ]
@@ -12,10 +12,30 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
   const [viewport, setViewport] = useState('desktop')
   const [showCode, setShowCode] = useState(false)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [scaleFactor, setScaleFactor] = useState(1)
   const iframeRef = useRef(null)
+  const wrapRef = useRef(null)
 
   const currentViewport = VIEWPORTS.find(v => v.id === viewport)
   const codeContent = selectedFile && files.get(selectedFile)?.content
+
+  // Calculate scale factor for desktop viewport to fit in the container
+  useEffect(() => {
+    if (!currentViewport.scale || showCode) return
+    const wrap = wrapRef.current
+    if (!wrap) return
+
+    const recalc = () => {
+      const wrapW = wrap.clientWidth - 24 // subtract padding
+      const targetW = currentViewport.px
+      const s = Math.min(1, wrapW / targetW)
+      setScaleFactor(s)
+    }
+    recalc()
+    const ro = new ResizeObserver(recalc)
+    ro.observe(wrap)
+    return () => ro.disconnect()
+  }, [viewport, showCode, currentViewport])
 
   // Auto-switch to code view when a file is selected from the tree
   useEffect(() => {
@@ -49,9 +69,10 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
           ))}
         </div>
 
-        {!showCode && currentViewport.px && (
+        {!showCode && (
           <div className="live-preview-vp-label">
-            {currentViewport.px}px — {currentViewport.label}
+            {currentViewport.px ? `${currentViewport.px}px` : '100%'} — {currentViewport.label}
+            {currentViewport.scale && scaleFactor < 1 ? ` (${Math.round(scaleFactor * 100)}%)` : ''}
           </div>
         )}
         {showCode && selectedFile && (
@@ -102,10 +123,16 @@ export default function LivePreview({ previewHtml, selectedFile, files }) {
             )}
           </div>
         ) : (
-          <div className="live-preview-iframe-wrap">
+          <div className="live-preview-iframe-wrap" ref={wrapRef}>
             <div
               className={`live-preview-iframe-container viewport-${viewport}`}
-              style={currentViewport.px ? { width: currentViewport.width } : {}}
+              style={{
+                width: currentViewport.width,
+                ...(currentViewport.scale ? {
+                  transform: `scale(${scaleFactor})`,
+                  transformOrigin: 'top left',
+                } : {}),
+              }}
             >
               {previewHtml ? (
                 <iframe

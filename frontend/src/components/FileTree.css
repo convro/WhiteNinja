@@ -14,7 +14,7 @@
   flex-shrink: 0;
   font-size: 12px;
   font-weight: 700;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
