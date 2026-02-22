@@ -86,7 +86,7 @@ const wss = new WebSocketServer({ server, path: '/ws' })
 
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
-app.use('/test-builds', express.static(TEST_BUILDS_DIR))
+app.use('/api/test-builds', express.static(TEST_BUILDS_DIR))
 
 // DeepSeek client via OpenAI SDK
 const deepseek = new OpenAI({
@@ -828,7 +828,7 @@ async function saveBuildToDisk(session) {
     }
 
     logger.info('TestBuilds', `Saved ${files.length} files to disk for session ${session.id.slice(0, 8)}`)
-    return `/test-builds/${session.id}/`
+    return `/api/test-builds/${session.id}/`
   } catch (err) {
     logger.error('TestBuilds', `Failed to save build to disk for session ${session.id.slice(0, 8)}`, { error: err.message })
     return null
@@ -1689,7 +1689,7 @@ server.listen(PORT, async () => {
 
   // Ensure test-builds directory exists
   await mkdir(TEST_BUILDS_DIR, { recursive: true }).catch(() => {})
-  logger.info('Server', `Test builds served at /test-builds/`)
+  logger.info('Server', `Test builds served at /api/test-builds/`)
 
   // Clean up old builds on startup
   cleanupOldBuilds()
