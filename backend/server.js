@@ -11,6 +11,8 @@ import { fileURLToPath } from 'url'
 import { FileManager } from './builder/fileManager.js'
 import { getBaseTemplate } from './builder/templateEngine.js'
 import { formatImageCatalogForAgent } from './builder/imageCatalog.js'
+import { formatColorBookForAgent } from './builder/colorBook.js'
+import { formatImageContextForAgent, isPexelsAvailable, searchAndDownloadImages, parseImageRequestsFromPlan } from './builder/imageSearch.js'
 import { createZipBundle } from './builder/bundler.js'
 import { architect } from './agents/architect.js'
 import { frontendDev } from './agents/frontend-dev.js'
@@ -47,7 +49,7 @@ const logger = {
 // CONSTANTS & CONFIGURATION
 // ============================================================
 
-const SERVER_VERSION = '0.2.0'
+const SERVER_VERSION = '0.3.0'
 const MAX_CONCURRENT_BUILDS = 3
 const MAX_API_CALLS_PER_MINUTE = 10
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
@@ -86,7 +88,7 @@ const wss = new WebSocketServer({ server, path: '/ws' })
 
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
-app.use('/test-builds', express.static(TEST_BUILDS_DIR))
+app.use('/api/test-builds', express.static(TEST_BUILDS_DIR))
 
 // DeepSeek client via OpenAI SDK
 const deepseek = new OpenAI({
@@ -305,6 +307,9 @@ class BuildSession {
     this.createdAt = Date.now()
     this.lastActivity = Date.now()
     this.skippedPhases = []
+    this.downloadedImages = []
+    this.referenceStyleBrief = ''
+    this.reviewScores = null
   }
 
   touchActivity() {
@@ -479,6 +484,10 @@ wss.on('connection', (ws) => {
           }
           const sessionId = uuidv4()
           const session = new BuildSession(ws, sessionId, msg.brief.trim(), configValidation.config)
+          // Store reference URLs if provided (for style analysis)
+          if (msg.referenceUrls && Array.isArray(msg.referenceUrls)) {
+            session.referenceUrls = msg.referenceUrls.filter(u => typeof u === 'string' && u.startsWith('http')).slice(0, 3)
+          }
           currentSession = session
           sessions.set(sessionId, session)
 
@@ -575,6 +584,7 @@ async function callAgentWithRetry(session, agent, userPrompt, additionalContext 
       // Exponential backoff: 2s, 4s, 8s ...
       const backoffMs = Math.pow(2, attempt) * 1000
       logger.warn('AgentRetry', `Attempt ${attempt}/${API_RETRY_COUNT} failed for agent ${agent.id}, retrying in ${backoffMs}ms`, { error: err.message })
+      session.sendThinking(agent.id, `Hit a snag (${err.message?.slice(0, 80) || 'timeout'}). Retrying (attempt ${attempt + 1}/${API_RETRY_COUNT})...`)
       await sleep(backoffMs)
     }
   }
@@ -629,8 +639,11 @@ ${recentMsgs || 'No recent activity'}
 ## CURRENT FILES
 ${filesContext || 'No files yet'}
 
-## AVAILABLE IMAGES (use these real URLs in <img> tags!)
-${formatImageCatalogForAgent()}
+## CURATED COLOR BOOK
+${formatColorBookForAgent()}
+
+## AVAILABLE IMAGES
+${session.downloadedImages?.length > 0 ? formatImageContextForAgent(session.downloadedImages) : formatImageContextForAgent()}
 
 ${additionalContext ? `## ADDITIONAL CONTEXT\n${additionalContext}` : ''}
 
@@ -827,7 +840,7 @@ async function saveBuildToDisk(session) {
     }
 
     logger.info('TestBuilds', `Saved ${files.length} files to disk for session ${session.id.slice(0, 8)}`)
-    return `/test-builds/${session.id}/`
+    return `/api/test-builds/${session.id}/`
   } catch (err) {
     logger.error('TestBuilds', `Failed to save build to disk for session ${session.id.slice(0, 8)}`, { error: err.message })
     return null
@@ -868,6 +881,38 @@ async function runBuild(session) {
   }
 
   logger.info('Build', `Starting build ${session.id.slice(0, 8)} -- "${session.brief.slice(0, 60)}"`)
+
+  // ── PRE-PHASE: REFERENCE URL ANALYSIS ──
+  // If user provided reference URLs, analyze them for style direction
+  if (session.referenceUrls?.length > 0) {
+    session.setProgress(2, 'Analyzing reference sites')
+    session.sendThinking('architect', `Analyzing ${session.referenceUrls.length} reference site(s) for visual direction...`)
+
+    try {
+      const refAnalysisResponse = await deepseek.chat.completions.create({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a senior web designer. Analyze reference URLs and describe their visual style concisely. Focus on: layout patterns, color palette mood, typography style, overall aesthetic, and key design patterns. Return a concise 3-5 sentence summary.',
+          },
+          {
+            role: 'user',
+            content: `The user wants their website to be inspired by these reference sites:\n${session.referenceUrls.join('\n')}\n\nBased on the URLs (domain names, paths, and likely content), describe the visual style direction the user is going for. Be specific about colors, typography, layout, and mood.`,
+          },
+        ],
+        max_tokens: 500,
+      })
+
+      session.referenceStyleBrief = refAnalysisResponse.choices?.[0]?.message?.content?.trim() || ''
+      if (session.referenceStyleBrief) {
+        session.sendThinking('architect', `Reference analysis: ${session.referenceStyleBrief.slice(0, 200)}...`)
+        logger.info('Build', `Reference URL analysis complete for session ${session.id.slice(0, 8)}`)
+      }
+    } catch (err) {
+      logger.warn('Build', `Reference URL analysis failed for session ${session.id.slice(0, 8)}`, { error: err.message })
+    }
+  }
 
   // ── PHASE 1: PLANNING ──
   session.sendPhaseChange('PLANNING')
@@ -911,12 +956,17 @@ STEP 3 — Brief the team with SPECIFIC creative direction:
 TEMPLATE GUIDANCE:
 ${template.description}
 
-REQUIRED SECTIONS (adapt to the brief):
+PLANNED PAGES:
+${(template.pages || []).map(p => `- ${p.file} — ${p.navLabel}: ${p.description}`).join('\n')}
+
+REQUIRED SECTIONS for index.html (adapt to the brief):
 ${template.sections.join('\n')}
 
 PLANNED FILES: ${template.files.join(', ')}
 
 ${template.designGuidance || ''}
+
+${session.referenceStyleBrief ? `REFERENCE SITE ANALYSIS (user wants a similar style):\n${session.referenceStyleBrief}\n\nUse this as visual direction — match the mood, layout patterns, and aesthetic described above.` : ''}
 
 Write complete, content-rich HTML. Every section should have enough real content that a client could read it and say "yes, this is my website."`
   )
@@ -946,27 +996,54 @@ Write complete, content-rich HTML. Every section should have enough real content
     template,
     brief: session.brief,
     filesPlanned: template.files,
+    pagesPlanned: template.pages || [],
     sectionsPlanned: template.sections,
     designGuidance: template.designGuidance || '',
     architectNotes: architectThinking,
     teamBriefing: architectMessages,
+    referenceStyleBrief: session.referenceStyleBrief || '',
+  }
+
+  // ── IMAGE SEARCH (after planning, before scaffolding) ──
+  if (isPexelsAvailable() && planResponse) {
+    const imageRequests = parseImageRequestsFromPlan(planResponse)
+    if (imageRequests.length > 0) {
+      session.setProgress(12, `Searching for ${imageRequests.length} images`)
+      session.sendThinking('architect', `Found ${imageRequests.length} image requests. Searching Pexels for real photos...`)
+
+      const buildDir = join(TEST_BUILDS_DIR, session.id)
+      const downloaded = await searchAndDownloadImages(imageRequests, buildDir)
+      session.downloadedImages = downloaded
+
+      if (downloaded.length > 0) {
+        session.sendThinking('architect', `Downloaded ${downloaded.length} images: ${downloaded.map(d => d.alt).join(', ')}`)
+        logger.info('ImageSearch', `Downloaded ${downloaded.length} images for session ${session.id.slice(0, 8)}`)
+      }
+    }
   }
 
   session.setProgress(15, 'Planning complete')
   await sleep(800)
 
-  // ── PHASE 2: SCAFFOLDING ──
+  // ── PHASE 2+3: SCAFFOLDING + STYLING (PARALLEL) ──
+  // Maja (JS) and Leo (CSS) work simultaneously based on Kuba's HTML
   session.sendPhaseChange('SCAFFOLDING')
-  session.setProgress(20, 'Setting up file structure')
+  session.setProgress(20, 'JS + CSS in parallel')
 
   if (session.aborted) return
 
-  const scaffoldResponse = await callAgentWithRetry(
-    session,
-    frontendDev,
-    `Kuba finished the HTML. Your turn to make it interactive.
+  session.sendThinking('frontend-dev', `Kuba's HTML is ready. Reading every section and data attribute to plan the JS...`)
+  session.sendThinking('stylist', `Kuba's HTML is ready. Time to make this look incredible. Brief says: "${session.brief.slice(0, 100)}..." — I can already see the visual direction.`)
 
-READ index.html carefully — note every section, class name, and data-* attribute.
+  // Run both agents in parallel
+  const [scaffoldResponse, stylistResponse] = await Promise.all([
+    callAgentWithRetry(
+      session,
+      frontendDev,
+      `Kuba finished the HTML. Your turn to make it interactive.
+
+READ ALL HTML files carefully — note every section, class name, and data-* attribute.
+This may be a MULTI-PAGE site — your JS must work on ALL pages (null-check page-specific elements).
 
 Create js/main.js with ALL of this:
 
@@ -984,50 +1061,35 @@ ALSO create js/animations.js if animations are enabled (${config?.animations ? '
 - Parallax effect on hero if applicable
 - Staggered animation on card grids
 
+MULTI-PAGE NOTE: null-check everything. Elements like pricing toggles, FAQ accordions, or contact forms may only exist on specific pages.
+
 After writing code:
 - MESSAGE @leo listing ALL state classes you're toggling: .is-open, .is-visible, .is-scrolled, .is-invalid, .is-valid, etc. — he needs to write CSS for ALL of these
 - MESSAGE @nova that JS is ready for review
 
 The brief: "${session.brief.slice(0, 200)}"`
-  )
+    ),
+    callAgentWithRetry(
+      session,
+      stylist,
+      `Kuba has built the HTML structure. Now make this look INCREDIBLE.
 
-  if (session.aborted) return
+READ ALL HTML files carefully — note every section, every class name, every element.
+READ the messages from Kuba — they'll tell you the design direction and color choices.
 
-  if (scaffoldResponse) {
-    parseAgentResponse(session, 'frontend-dev', scaffoldResponse)
-  } else {
-    logger.warn('Build', `Scaffolding phase failed for session ${session.id.slice(0, 8)}, skipping`)
-    session.skippedPhases.push('SCAFFOLDING')
-    session.send('phase_skipped', { phase: 'SCAFFOLDING', reason: 'Frontend dev agent failed to respond' })
-  }
-
-  session.setProgress(30, 'Scaffolding complete')
-  await sleep(600)
-
-  // ── PHASE 3: CODING ──
-  session.sendPhaseChange('CODING')
-  session.setProgress(35, 'Frontend dev coding')
-
-  // Leo styles in parallel with Maja coding
-  session.sendThinking('stylist', `Kuba and Maja have finished the structure. Time to make this look incredible. Brief says: "${session.brief.slice(0, 100)}..." — I can already see the visual direction.`)
-
-  const stylistResponse = await callAgentWithRetry(
-    session,
-    stylist,
-    `Kuba and Maja have built the HTML and JS. Now make this look INCREDIBLE.
-
-READ index.html carefully — note every section, every class name, every element.
-READ the messages from Kuba and Maja — they'll tell you the design direction and JS state classes.
-
-Create css/styles.css following the DESIGN SYSTEM STRUCTURE from your system prompt. This must be COMPLETE — every section styled, every interactive state handled.
+Create css/styles.css following the DESIGN SYSTEM STRUCTURE from your system prompt.
+This must be COMPLETE — every section styled, every interactive state handled.
+The CSS must work across ALL pages (shared stylesheet).
 
 DESIGN PARAMETERS:
 - Style preset: ${config?.stylePreset || 'modern-dark'}
-- ${config?.darkMode ? 'DARK THEME: Rich dark backgrounds (#0a0a0f base), light text, colored glows and accent borders. NOT plain black — use subtle gradients and surface elevation.' : 'LIGHT THEME: Clean whites, subtle warm shadows, airy feel. NOT sterile — add warmth with off-white backgrounds and soft color tints.'}
-- Primary brand color: ${config?.primaryColor || '#3b82f6'} — build a full palette from this (light, dark, glow, muted variants)
+- ${config?.darkMode ? 'DARK THEME: Rich dark backgrounds using darkest shades from color book, light text, colored glows and accent borders. NOT plain black — use subtle gradients and surface elevation.' : 'LIGHT THEME: Clean whites using lightest shades from color book, subtle warm shadows, airy feel. NOT sterile — add warmth with tinted backgrounds.'}
+- Use the CURATED COLOR BOOK from your context — pick colors matching the brief's mood
 - ${config?.animations ? 'ANIMATIONS: CSS transitions on ALL interactive elements, @keyframes for scroll-triggered entrances (.animate-on-scroll → .is-visible), hover lift on cards, button press effects' : 'MINIMAL ANIMATIONS: only hover states and focus rings, no entrance animations'}
 - ${config?.responsive ? 'RESPONSIVE (mobile-first): base styles for mobile, @media (min-width: 768px) for tablet, @media (min-width: 1200px) for desktop' : 'DESKTOP-FIRST: optimize for 1200px+'}
 - Font: ${config?.fontPreference || 'sans-serif'}
+
+${session.referenceStyleBrief ? `REFERENCE STYLE DIRECTION (from user's reference sites):\n${session.referenceStyleBrief}\n` : ''}
 
 CRITICAL QUALITY CHECKS:
 - Hero section: full viewport height, dramatic background (gradient or pattern), commanding headline size
@@ -1043,20 +1105,31 @@ ${config?.animations ? `ANIMATION CLASSES TO STYLE:
 - .animate-on-scroll.is-visible { opacity: 1; transform: translateY(0); }
 - Stagger delays: .animate-on-scroll:nth-child(2) { transition-delay: 0.1s; } etc.` : ''}
 
-STATE CLASSES FROM MAJA'S JS (style all of these):
+STATE CLASSES (style all of these — Maja is implementing them in JS):
 - .is-open (mobile nav menu visible)
 - .is-scrolled (navbar background/shadow when scrolled)
 - .is-visible (scroll-triggered animation complete)
 - .is-invalid / .is-valid (form field validation states)
 - .is-hidden (hide-on-scroll navbar)
+- .is-active (current page nav link)
 
 After styling, MESSAGE @rex that CSS is complete and ready for QA.
 Also MESSAGE @maja if you need any HTML structure changes.
 
 The result should look like a $10,000+ agency project, not a free template.`
-  )
+    ),
+  ])
 
   if (session.aborted) return
+
+  // Parse both responses
+  if (scaffoldResponse) {
+    parseAgentResponse(session, 'frontend-dev', scaffoldResponse)
+  } else {
+    logger.warn('Build', `Scaffolding phase failed for session ${session.id.slice(0, 8)}, skipping`)
+    session.skippedPhases.push('SCAFFOLDING')
+    session.send('phase_skipped', { phase: 'SCAFFOLDING', reason: 'Frontend dev agent failed to respond' })
+  }
 
   if (stylistResponse) {
     parseAgentResponse(session, 'stylist', stylistResponse)
@@ -1066,7 +1139,8 @@ The result should look like a $10,000+ agency project, not a free template.`
     session.send('phase_skipped', { phase: 'CODING', reason: 'Stylist agent failed to respond' })
   }
 
-  session.setProgress(50, 'Styling applied')
+  session.sendPhaseChange('CODING')
+  session.setProgress(50, 'JS + CSS complete')
   await sleep(600)
 
   // Add user feedback if any — pass current file state so Maja sees latest CSS/HTML
@@ -1142,6 +1216,28 @@ Write a MESSAGE @leo with the top 2 CSS improvements needed.`
 
   if (reviewResponse) {
     parseAgentResponse(session, 'reviewer', reviewResponse)
+
+    // Parse reviewer scores from THINKING block
+    const scoresMatch = reviewResponse.match(/SCORES:\s*responsiveness=(\d+)\s+aesthetics=(\d+)\s+accessibility=(\d+)\s+interactivity=(\d+)\s+content=(\d+)\s+brief_compliance=(\d+)/i)
+    if (scoresMatch) {
+      session.reviewScores = {
+        responsiveness: parseInt(scoresMatch[1]),
+        aesthetics: parseInt(scoresMatch[2]),
+        accessibility: parseInt(scoresMatch[3]),
+        interactivity: parseInt(scoresMatch[4]),
+        content: parseInt(scoresMatch[5]),
+        briefCompliance: parseInt(scoresMatch[6]),
+      }
+      const avgScore = Object.values(session.reviewScores).reduce((a, b) => a + b, 0) / 6
+      const lowScores = Object.entries(session.reviewScores).filter(([, v]) => v < 7).map(([k]) => k)
+
+      session.send('review_scores', { scores: session.reviewScores, average: avgScore.toFixed(1), lowCategories: lowScores })
+      logger.info('Review', `Scores for session ${session.id.slice(0, 8)}: avg=${avgScore.toFixed(1)}, low=[${lowScores.join(',')}]`, session.reviewScores)
+
+      if (lowScores.length > 0) {
+        session.sendThinking('reviewer', `Categories below quality threshold (< 7): ${lowScores.join(', ')}. These need priority fixes.`)
+      }
+    }
   } else {
     logger.warn('Build', `Review phase failed for session ${session.id.slice(0, 8)}, skipping`)
     session.skippedPhases.push('REVIEWING')
@@ -1169,12 +1265,25 @@ After fixing, MESSAGE @nova confirming what you fixed and flagging anything you 
 MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
     )
 
-    if (!session.aborted && fixResponse) {
+    if (session.aborted) return
+
+    if (fixResponse) {
       parseAgentResponse(session, 'frontend-dev', fixResponse)
+    } else {
+      logger.warn('Build', `Fix phase (frontend-dev) failed for session ${session.id.slice(0, 8)}, continuing with current code`)
+      session.send('agent_error', {
+        agentId: 'frontend-dev',
+        message: 'Frontend dev could not apply fixes — continuing with current code',
+        recoverable: true,
+      })
     }
   } else {
     session.sendThinking('frontend-dev', "Nova's review came back clean — no major issues. Doing a final JS polish pass anyway...")
   }
+
+  session.setProgress(76, 'Code fixes applied, polishing styles')
+
+  if (session.aborted) return
 
   // Leo does final styling pass — IMPORTANT: pass Maja's latest HTML+JS so Leo sees her fixes
   session.sendThinking('stylist', "Nova pointed out some CSS issues. Also doing my own final aesthetic pass — I want this to look perfect.")
@@ -1214,8 +1323,17 @@ Output the COMPLETE updated css/styles.css.
 After updating, MESSAGE @rex that design is polished.`
   )
 
-  if (!session.aborted && stylistPolish) {
+  if (session.aborted) return
+
+  if (stylistPolish) {
     parseAgentResponse(session, 'stylist', stylistPolish)
+  } else {
+    logger.warn('Build', `Fix phase (stylist) failed for session ${session.id.slice(0, 8)}, continuing with current styles`)
+    session.send('agent_error', {
+      agentId: 'stylist',
+      message: 'Stylist could not apply final polish — continuing with current styles',
+      recoverable: true,
+    })
   }
 
   session.setProgress(82, 'Fixes applied')
@@ -1355,8 +1473,17 @@ Output COMPLETE updated files for every file you change.
 MESSAGE @leo about any CSS-related bugs you can't fix from HTML/JS side.`
       )
 
-      if (!session.aborted && bugfixResponse) {
+      if (session.aborted) return
+
+      if (bugfixResponse) {
         parseAgentResponse(session, 'frontend-dev', bugfixResponse)
+      } else {
+        logger.warn('Build', `Bugfix phase (frontend-dev) failed for session ${session.id.slice(0, 8)}, continuing`)
+        session.send('agent_error', {
+          agentId: 'frontend-dev',
+          message: 'Frontend dev could not apply bugfixes — continuing with current code',
+          recoverable: true,
+        })
       }
 
       // Leo fixes CSS bugs
@@ -1387,8 +1514,17 @@ ${currentHtmlForBugfix.slice(0, 6000)}
 Output the COMPLETE updated css/styles.css.`
         )
 
-        if (!session.aborted && cssBugfixResponse) {
+        if (session.aborted) return
+
+        if (cssBugfixResponse) {
           parseAgentResponse(session, 'stylist', cssBugfixResponse)
+        } else {
+          logger.warn('Build', `Bugfix phase (stylist) failed for session ${session.id.slice(0, 8)}, continuing`)
+          session.send('agent_error', {
+            agentId: 'stylist',
+            message: 'Stylist could not apply CSS bugfixes — continuing with current styles',
+            recoverable: true,
+          })
         }
       }
 
@@ -1460,6 +1596,9 @@ ${currentHtmlForPolish.slice(0, 4000)}`
     qaRounds: qaRound,
     tokenUsage: tokenUsage?.total || null,
     previewUrl: previewUrl || null,
+    reviewScores: session.reviewScores || null,
+    pagesCreated: session.fs.getPaths().filter(p => p.endsWith('.html')),
+    imagesDownloaded: session.downloadedImages?.length || 0,
   })
 
   logger.info('Build', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files, ${qaRound} QA rounds`, {
@@ -1648,7 +1787,7 @@ server.listen(PORT, async () => {
 
   // Ensure test-builds directory exists
   await mkdir(TEST_BUILDS_DIR, { recursive: true }).catch(() => {})
-  logger.info('Server', `Test builds served at /test-builds/`)
+  logger.info('Server', `Test builds served at /api/test-builds/`)
 
   // Clean up old builds on startup
   cleanupOldBuilds()
@@ -1659,8 +1798,16 @@ server.listen(PORT, async () => {
     logger.info('Server', 'DEEPSEEK_API_KEY is configured')
   }
 
+  // Log optional integrations
+  if (isPexelsAvailable()) {
+    logger.info('Server', 'PEXELS_API_KEY configured — image search enabled')
+  } else {
+    logger.info('Server', 'PEXELS_API_KEY not set — using static image catalog (set PEXELS_API_KEY for real image search)')
+  }
+
   logger.info('Server', `Rate limits: max ${MAX_CONCURRENT_BUILDS} concurrent builds, ${MAX_API_CALLS_PER_MINUTE} API calls/min/session`)
   logger.info('Server', `Session timeout: ${SESSION_TIMEOUT_MS / 60000} minutes, Agent timeout: ${AGENT_CALL_TIMEOUT_MS / 1000}s`)
+  logger.info('Server', 'Features: multi-page output, curated color book, parallel JS+CSS, reference URL analysis, reviewer scoring')
 })
 
 // ============================================================

@@ -127,31 +127,34 @@ export class FileManager {
 
   /**
    * Build a combined HTML preview (srcdoc).
+   * Supports multi-page: defaults to index.html, can preview any page.
    * Extracts body content from full HTML documents to avoid nesting
    * <!DOCTYPE> inside another <!DOCTYPE> in the iframe srcdoc.
    */
-  buildPreview() {
+  buildPreview(pagePath = 'index.html') {
     const htmlFile = this.getAll().find(f =>
-      f.path === 'index.html' || f.path.endsWith('/index.html')
+      f.path === pagePath || f.path === 'index.html' || f.path.endsWith('/index.html')
     )
     const cssFiles = this.getByExtensions(['.css'])
     const jsFiles = this.getByExtensions(['.js'])
 
+    // Collect all HTML pages for the page switcher
+    const htmlPages = this.getAll()
+      .filter(f => f.path.endsWith('.html'))
+      .map(f => f.path)
+
     if (!htmlFile) {
       const html = this.generateSkeletonPreview()
-      return { html: html.html, css: html.css, js: '' }
+      return { html: html.html, css: html.css, js: '', pages: htmlPages }
     }
 
     let html = htmlFile.content || ''
 
     // Extract body content if the HTML is a full document.
-    // The agent writes complete HTML files with <!DOCTYPE>, <html>, <head>, etc.
-    // We need just the <body> innerHTML for the srcdoc wrapper.
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
     if (bodyMatch) {
       html = bodyMatch[1].trim()
     } else if (html.includes('<!DOCTYPE') || html.includes('<html')) {
-      // Has doctype/html but no body tags — strip head/html wrappers
       html = html
         .replace(/<!DOCTYPE[^>]*>/i, '')
         .replace(/<\/?html[^>]*>/gi, '')
@@ -171,11 +174,13 @@ export class FileManager {
     html = html.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
     // Remove <link rel="stylesheet"> (CSS is injected via srcdoc <style>)
     html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*>/gi, '')
+    // Strip HTML edit note comments for cleaner preview
+    html = html.replace(/<!--\s*\[EDIT #[\s\S]*?-->/gi, '')
 
     const css = inlineCss + cssFiles.map(f => f.content).join('\n')
     const js = jsFiles.map(f => f.content).join('\n')
 
-    return { html, css, js }
+    return { html, css, js, pages: htmlPages }
   }
 
   generateSkeletonPreview() {

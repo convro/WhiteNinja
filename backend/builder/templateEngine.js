@@ -1,7 +1,7 @@
 /**
  * Base templates for different site types to give agents a head start.
- * Each template suggests a richer file structure so agents create
- * more than just 3 files — resulting in better-organized, more complete websites.
+ * Each template suggests a multi-page file structure so agents create
+ * richer, more complete websites with multiple pages.
  */
 
 export function getBaseTemplate(siteType, config) {
@@ -21,10 +21,17 @@ function getLandingTemplate(config) {
   return {
     files: [
       'index.html',
+      'about.html',
+      'contact.html',
       'css/styles.css',
       'css/animations.css',
       'js/main.js',
       'js/animations.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Home', navLabel: 'Home', description: 'Main landing page with hero, features, pricing, testimonials, CTA' },
+      { file: 'about.html', title: 'About', navLabel: 'About', description: 'Company story, team, values, mission' },
+      { file: 'contact.html', title: 'Contact', navLabel: 'Contact', description: 'Contact form, location info, FAQ' },
     ],
     sections: [
       'hero — full-viewport opening with headline, sub-copy, and CTA buttons',
@@ -38,7 +45,7 @@ function getLandingTemplate(config) {
       'footer — links, social icons, copyright, legal links',
     ],
     components: ['navbar', 'hero-section', 'logo-bar', 'feature-cards', 'step-cards', 'testimonial-cards', 'pricing-table', 'faq-accordion', 'cta-banner', 'contact-form', 'footer'],
-    description: 'High-converting marketing landing page. Think Stripe, Linear, or Vercel homepage quality. Smooth scroll, parallax-like sections, bold typography, clear visual hierarchy. Every section serves a purpose in the conversion funnel: attention → interest → trust → action.',
+    description: 'High-converting marketing landing page with multi-page structure. Think Stripe, Linear, or Vercel homepage quality. Smooth scroll, bold typography, clear visual hierarchy. Every section serves a purpose: attention → interest → trust → action. About and Contact pages provide depth.',
     designGuidance: `
 DESIGN PRINCIPLES:
 - Generous whitespace (80-120px between sections minimum)
@@ -48,7 +55,8 @@ DESIGN PRINCIPLES:
 - Consistent 8px spacing grid
 - Primary color used sparingly — only on CTAs and key accents
 - Section backgrounds alternate between white/off-white/tinted to create rhythm
-- Typography: pair a bold display font with a clean body font`,
+- Typography: pair a bold display font with a clean body font
+- Consistent navigation across all pages with active state on current page`,
   }
 }
 
@@ -56,10 +64,17 @@ function getPortfolioTemplate(config) {
   return {
     files: [
       'index.html',
+      'about.html',
+      'contact.html',
       'css/styles.css',
       'css/animations.css',
       'js/main.js',
       'js/animations.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Portfolio', navLabel: 'Work', description: 'Showcase page with hero, project grid, and quick intro' },
+      { file: 'about.html', title: 'About', navLabel: 'About', description: 'Personal story, skills, experience, and process' },
+      { file: 'contact.html', title: 'Contact', navLabel: 'Contact', description: 'Hire me form, availability, social links' },
     ],
     sections: [
       'hero — dramatic intro with name, title, and a bold visual statement',
@@ -72,7 +87,7 @@ function getPortfolioTemplate(config) {
       'footer — minimal, clean footer',
     ],
     components: ['navbar', 'hero-section', 'about-section', 'project-card', 'project-modal', 'service-cards', 'skill-display', 'testimonial-slider', 'contact-form', 'footer'],
-    description: 'Creative portfolio that showcases personality. Think award-winning designer portfolio — not a boring template. Subtle animations, magnetic cursor effects, smooth scroll transitions. The design IS the portfolio piece.',
+    description: 'Creative portfolio that showcases personality across multiple pages. Think award-winning designer portfolio — not a boring template. Subtle animations, smooth scroll transitions. The design IS the portfolio piece.',
     designGuidance: `
 DESIGN PRINCIPLES:
 - The portfolio itself must be impressive enough to be a portfolio piece
@@ -90,8 +105,15 @@ function getBlogTemplate(config) {
   return {
     files: [
       'index.html',
+      'about.html',
+      'contact.html',
       'css/styles.css',
       'js/main.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Blog', navLabel: 'Blog', description: 'Featured post, article grid, categories, newsletter signup' },
+      { file: 'about.html', title: 'About', navLabel: 'About', description: 'Author bio, writing philosophy, background' },
+      { file: 'contact.html', title: 'Contact', navLabel: 'Contact', description: 'Contact form, social links, collaboration info' },
     ],
     sections: [
       'header — clean navigation with logo, category links, search, dark mode toggle',
@@ -119,9 +141,18 @@ function getEcommerceTemplate(config) {
   return {
     files: [
       'index.html',
+      'products.html',
+      'about.html',
+      'contact.html',
       'css/styles.css',
       'js/main.js',
       'js/cart.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Home', navLabel: 'Home', description: 'Hero banner, featured products, categories, promotions, trust signals' },
+      { file: 'products.html', title: 'Products', navLabel: 'Shop', description: 'Full product grid with filters, sorting, product cards' },
+      { file: 'about.html', title: 'About', navLabel: 'About', description: 'Brand story, craftsmanship, values' },
+      { file: 'contact.html', title: 'Contact', navLabel: 'Contact', description: 'Customer service form, FAQ, store locations' },
     ],
     sections: [
       'announcement-bar — shipping info, current promo, or trust signal',
@@ -135,7 +166,7 @@ function getEcommerceTemplate(config) {
       'footer — shop links, customer service, social, payment method icons',
     ],
     components: ['announcement-bar', 'navbar', 'hero-banner', 'category-card', 'product-card', 'star-rating', 'cart-drawer', 'promo-banner', 'trust-badges', 'newsletter-popup', 'footer'],
-    description: 'Premium e-commerce experience. Think Shopify premium theme quality — clean product presentation, smooth cart interactions, trust-building elements throughout. Every detail builds buying confidence.',
+    description: 'Premium e-commerce experience with multi-page structure. Think Shopify premium theme quality — clean product presentation, smooth cart interactions, trust-building elements throughout.',
     designGuidance: `
 DESIGN PRINCIPLES:
 - Product images are hero — large, clean, consistent aspect ratios
@@ -156,6 +187,9 @@ function getDashboardTemplate(config) {
       'css/styles.css',
       'js/main.js',
       'js/charts.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Dashboard', navLabel: 'Overview', description: 'Main dashboard with metrics, charts, activity, data table' },
     ],
     sections: [
       'sidebar — collapsible nav with icons, sections, active states, user avatar at bottom',
@@ -184,8 +218,15 @@ function getCustomTemplate(config) {
   return {
     files: [
       'index.html',
+      'about.html',
+      'contact.html',
       'css/styles.css',
       'js/main.js',
+    ],
+    pages: [
+      { file: 'index.html', title: 'Home', navLabel: 'Home', description: 'Main page with hero and key content sections' },
+      { file: 'about.html', title: 'About', navLabel: 'About', description: 'About page with story, team, values' },
+      { file: 'contact.html', title: 'Contact', navLabel: 'Contact', description: 'Contact form, info, FAQ' },
     ],
     sections: [
       'header — navigation with logo and links',
@@ -194,12 +235,13 @@ function getCustomTemplate(config) {
       'footer — contact info, links, copyright',
     ],
     components: ['navbar', 'hero-section', 'content-sections', 'contact-form', 'footer'],
-    description: 'Custom website tailored to the user brief. Read the brief carefully and design the structure around what they actually need. When in doubt, look at the best examples in the industry the brief describes.',
+    description: 'Custom multi-page website tailored to the user brief. Read the brief carefully and design the structure around what they actually need. When in doubt, look at the best examples in the industry the brief describes.',
     designGuidance: `
 DESIGN PRINCIPLES:
 - Match the tone of the brief — corporate = clean and professional, creative = bold and expressive
 - Generous whitespace, clear visual hierarchy
 - Responsive from the start
-- Every section must earn its place on the page`,
+- Every section must earn its place on the page
+- Consistent navigation across all pages`,
   }
 }
