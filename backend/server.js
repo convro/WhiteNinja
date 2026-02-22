@@ -575,6 +575,7 @@ async function callAgentWithRetry(session, agent, userPrompt, additionalContext 
       // Exponential backoff: 2s, 4s, 8s ...
       const backoffMs = Math.pow(2, attempt) * 1000
       logger.warn('AgentRetry', `Attempt ${attempt}/${API_RETRY_COUNT} failed for agent ${agent.id}, retrying in ${backoffMs}ms`, { error: err.message })
+      session.sendThinking(agent.id, `Hit a snag (${err.message?.slice(0, 80) || 'timeout'}). Retrying (attempt ${attempt + 1}/${API_RETRY_COUNT})...`)
       await sleep(backoffMs)
     }
   }
@@ -1169,12 +1170,25 @@ After fixing, MESSAGE @nova confirming what you fixed and flagging anything you 
 MESSAGE @leo if any class names in the HTML changed so he can update the CSS.`
     )
 
-    if (!session.aborted && fixResponse) {
+    if (session.aborted) return
+
+    if (fixResponse) {
       parseAgentResponse(session, 'frontend-dev', fixResponse)
+    } else {
+      logger.warn('Build', `Fix phase (frontend-dev) failed for session ${session.id.slice(0, 8)}, continuing with current code`)
+      session.send('agent_error', {
+        agentId: 'frontend-dev',
+        message: 'Frontend dev could not apply fixes — continuing with current code',
+        recoverable: true,
+      })
     }
   } else {
     session.sendThinking('frontend-dev', "Nova's review came back clean — no major issues. Doing a final JS polish pass anyway...")
   }
+
+  session.setProgress(76, 'Code fixes applied, polishing styles')
+
+  if (session.aborted) return
 
   // Leo does final styling pass — IMPORTANT: pass Maja's latest HTML+JS so Leo sees her fixes
   session.sendThinking('stylist', "Nova pointed out some CSS issues. Also doing my own final aesthetic pass — I want this to look perfect.")
@@ -1214,8 +1228,17 @@ Output the COMPLETE updated css/styles.css.
 After updating, MESSAGE @rex that design is polished.`
   )
 
-  if (!session.aborted && stylistPolish) {
+  if (session.aborted) return
+
+  if (stylistPolish) {
     parseAgentResponse(session, 'stylist', stylistPolish)
+  } else {
+    logger.warn('Build', `Fix phase (stylist) failed for session ${session.id.slice(0, 8)}, continuing with current styles`)
+    session.send('agent_error', {
+      agentId: 'stylist',
+      message: 'Stylist could not apply final polish — continuing with current styles',
+      recoverable: true,
+    })
   }
 
   session.setProgress(82, 'Fixes applied')
@@ -1355,8 +1378,17 @@ Output COMPLETE updated files for every file you change.
 MESSAGE @leo about any CSS-related bugs you can't fix from HTML/JS side.`
       )
 
-      if (!session.aborted && bugfixResponse) {
+      if (session.aborted) return
+
+      if (bugfixResponse) {
         parseAgentResponse(session, 'frontend-dev', bugfixResponse)
+      } else {
+        logger.warn('Build', `Bugfix phase (frontend-dev) failed for session ${session.id.slice(0, 8)}, continuing`)
+        session.send('agent_error', {
+          agentId: 'frontend-dev',
+          message: 'Frontend dev could not apply bugfixes — continuing with current code',
+          recoverable: true,
+        })
       }
 
       // Leo fixes CSS bugs
@@ -1387,8 +1419,17 @@ ${currentHtmlForBugfix.slice(0, 6000)}
 Output the COMPLETE updated css/styles.css.`
         )
 
-        if (!session.aborted && cssBugfixResponse) {
+        if (session.aborted) return
+
+        if (cssBugfixResponse) {
           parseAgentResponse(session, 'stylist', cssBugfixResponse)
+        } else {
+          logger.warn('Build', `Bugfix phase (stylist) failed for session ${session.id.slice(0, 8)}, continuing`)
+          session.send('agent_error', {
+            agentId: 'stylist',
+            message: 'Stylist could not apply CSS bugfixes — continuing with current styles',
+            recoverable: true,
+          })
         }
       }
 
