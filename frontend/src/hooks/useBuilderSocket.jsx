@@ -286,6 +286,10 @@ export function useBuilderSocket() {
     emit('approve_phase')
   }, [emit])
 
+  const requestRevision = useCallback((sessionId, feedback) => {
+    emit('request_revision', { sessionId, feedback })
+  }, [emit])
+
   useEffect(() => {
     connect()
     return () => {
@@ -304,6 +308,7 @@ export function useBuilderSocket() {
     pauseBuild,
     resumeBuild,
     approvePhase,
+    requestRevision,
 
     // New capabilities
     latencyMs,

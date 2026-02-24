@@ -52,6 +52,9 @@ export default function App() {
   const [configSuggestions, setConfigSuggestions] = useState(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [buildStartTime, setBuildStartTime] = useState(null)
+  const [revisionCount, setRevisionCount] = useState(0)
+  const [revisionFeedback, setRevisionFeedback] = useState(null)
+  const [isRevising, setIsRevising] = useState(false)
 
   const goToPhase = useCallback((nextPhase) => {
     setPhase(nextPhase)
@@ -103,14 +106,25 @@ export default function App() {
   const handleConfigSubmit = useCallback((cfg) => {
     setConfig(cfg)
     setBuildStartTime(Date.now())
+    setRevisionCount(0)
+    setRevisionFeedback(null)
     setPhase(PHASES.BUILDING)
   }, [])
 
   const handleBuildComplete = useCallback((result) => {
     const buildTime = buildStartTime ? Math.round((Date.now() - buildStartTime) / 1000) : null
     setBuildResult({ ...result, buildTime })
+    setIsRevising(false)
     setPhase(PHASES.REVIEW)
   }, [buildStartTime])
+
+  const handleRequestRevision = useCallback((feedback) => {
+    setRevisionFeedback(feedback)
+    setRevisionCount(prev => prev + 1)
+    setIsRevising(true)
+    setBuildStartTime(Date.now())
+    setPhase(PHASES.BUILDING)
+  }, [])
 
   const handleStartOver = useCallback(() => {
     setBrief('')
@@ -119,6 +133,9 @@ export default function App() {
     setConfigSuggestions(null)
     setIsAnalyzing(false)
     setBuildStartTime(null)
+    setRevisionCount(0)
+    setRevisionFeedback(null)
+    setIsRevising(false)
     setPhase(PHASES.WELCOME)
   }, [])
 
@@ -181,7 +198,7 @@ export default function App() {
 
         {phase === PHASES.BUILDING && (
           <motion.div
-            key="building"
+            key={`building-${revisionCount}`}
             variants={pageVariants}
             initial="initial"
             animate="animate"
@@ -194,6 +211,8 @@ export default function App() {
               config={config}
               onComplete={handleBuildComplete}
               onStartOver={handleStartOver}
+              revisionFeedback={revisionFeedback}
+              previousFiles={revisionFeedback ? buildResult?.files : null}
             />
           </motion.div>
         )}
@@ -212,6 +231,9 @@ export default function App() {
               result={buildResult}
               brief={brief}
               onStartOver={handleStartOver}
+              onRequestRevision={handleRequestRevision}
+              isRevising={isRevising}
+              revisionCount={revisionCount}
             />
           </motion.div>
         )}

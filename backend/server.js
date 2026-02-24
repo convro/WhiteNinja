@@ -488,16 +488,31 @@ wss.on('connection', (ws) => {
           if (msg.referenceUrls && Array.isArray(msg.referenceUrls)) {
             session.referenceUrls = msg.referenceUrls.filter(u => typeof u === 'string' && u.startsWith('http')).slice(0, 3)
           }
+
+          // Handle revision mode: pre-load previous files and store feedback
+          if (msg.revisionFeedback && msg.previousFiles && Array.isArray(msg.previousFiles)) {
+            session.isRevision = true
+            session.revisionFeedback = msg.revisionFeedback
+            // Restore previous files into the session's file manager
+            for (const file of msg.previousFiles) {
+              if (file.path && file.content) {
+                session.fs.create(file.path, file.content, 'previous-build')
+              }
+            }
+          }
+
           currentSession = session
           sessions.set(sessionId, session)
 
-          logger.info('WS', `Build session started: ${sessionId.slice(0, 8)}`, {
+          logger.info('WS', `${session.isRevision ? 'Revision' : 'Build'} session started: ${sessionId.slice(0, 8)}`, {
             siteType: configValidation.config.siteType || 'landing',
             briefLength: msg.brief.trim().length,
+            isRevision: !!session.isRevision,
           })
 
-          // Run the build in background
-          runBuild(session).catch(err => {
+          // Run the build (or revision) in background
+          const buildFn = session.isRevision ? runRevision : runBuild
+          buildFn(session).catch(err => {
             logger.error('Build', `Unhandled build error for session ${sessionId.slice(0, 8)}`, { error: err.message })
             session.send('build_error', { message: err.message })
           })
@@ -867,6 +882,225 @@ async function cleanupOldBuilds() {
 // ============================================================
 // BUILD ORCHESTRATION (with error recovery per phase)
 // ============================================================
+
+// ============================================================
+// REVISION ORCHESTRATION (lighter flow for user-requested changes)
+// ============================================================
+
+async function runRevision(session) {
+  const feedback = session.revisionFeedback
+  const { config } = session
+
+  logger.info('Revision', `Starting revision ${session.id.slice(0, 8)} -- feedback: "${feedback.slice(0, 120)}"`)
+
+  // ── PHASE 1: ANALYZE FEEDBACK ──
+  session.sendPhaseChange('PLANNING')
+  session.setProgress(5, 'Analyzing your feedback')
+
+  session.sendThinking('architect', `Reading user revision feedback: "${feedback.slice(0, 200)}..." — I'll coordinate the team to make these changes.`)
+
+  // Architect analyzes feedback and creates a revision plan
+  const planResponse = await callAgentWithRetry(
+    session,
+    architect,
+    `The user has reviewed the completed website and wants changes.
+
+USER'S REVISION FEEDBACK:
+"${feedback}"
+
+ORIGINAL BRIEF: "${session.brief}"
+
+CONFIGURATION:
+- Site type: ${config?.siteType || 'landing'}
+- Style preset: ${config?.stylePreset || 'modern-dark'}
+- Dark mode: ${config?.darkMode ? 'yes' : 'no'}
+- Animations: ${config?.animations ? 'yes' : 'no'}
+
+IMPORTANT: The website is already built. You are making TARGETED CHANGES based on the user's feedback.
+- Do NOT rewrite everything from scratch
+- Only modify files that need changes based on the feedback
+- If the feedback mentions HTML/content changes, update the relevant HTML file(s)
+- If it's purely visual, just MESSAGE @leo with the changes
+- If it needs new JS behavior, MESSAGE @maja
+
+Read the current files carefully, then:
+1. THINK about what needs to change
+2. Update any HTML files that need content/structure changes (output COMPLETE updated files)
+3. MESSAGE @maja if JS changes are needed
+4. MESSAGE @leo with CSS/visual changes needed
+
+Be surgical — change only what the user asked for.`
+  )
+
+  if (session.aborted) return
+
+  if (planResponse) {
+    parseAgentResponse(session, 'architect', planResponse)
+  }
+
+  session.setProgress(25, 'Revision plan ready')
+  await sleep(500)
+
+  if (session.aborted) return
+
+  // ── PHASE 2: APPLY CHANGES (JS + CSS in parallel) ──
+  session.sendPhaseChange('SCAFFOLDING')
+  session.setProgress(30, 'Applying changes')
+
+  session.sendThinking('frontend-dev', `User wants changes: "${feedback.slice(0, 150)}..." — updating JS and HTML as needed.`)
+  session.sendThinking('stylist', `User feedback received. Reading their requests and adjusting the design accordingly.`)
+
+  const [jsResponse, cssResponse] = await Promise.all([
+    callAgentWithRetry(
+      session,
+      frontendDev,
+      `The user reviewed the website and requested changes:
+
+USER FEEDBACK: "${feedback}"
+
+Read the current files carefully. Make TARGETED changes to address the user's feedback.
+- Only modify files that need to change
+- Output COMPLETE updated files (not fragments)
+- If the user asked for new sections/features, add them
+- If they asked to remove something, remove it
+- If they asked for behavioral changes, update the JS
+
+After changes, MESSAGE @leo about any new elements or state classes that need styling.`
+    ),
+    callAgentWithRetry(
+      session,
+      stylist,
+      `The user reviewed the website and requested changes:
+
+USER FEEDBACK: "${feedback}"
+
+Read the current CSS and HTML carefully. Make TARGETED CSS changes to address the user's feedback.
+- Only update styles that relate to the feedback
+- If the user asked for color/font/layout changes, apply them
+- Keep everything else as-is
+- Output the COMPLETE updated css/styles.css
+
+The result should still look professional and polished after changes.`
+    ),
+  ])
+
+  if (session.aborted) return
+
+  if (jsResponse) {
+    parseAgentResponse(session, 'frontend-dev', jsResponse)
+  }
+  if (cssResponse) {
+    parseAgentResponse(session, 'stylist', cssResponse)
+  }
+
+  session.setProgress(65, 'Changes applied')
+  await sleep(400)
+
+  // ── PHASE 3: QUICK REVIEW ──
+  session.sendPhaseChange('REVIEWING')
+  session.setProgress(70, 'Quick quality check')
+
+  session.sendThinking('reviewer', "Quick review of the revision changes — making sure nothing broke and the user's feedback was addressed.")
+
+  const reviewResponse = await callAgentWithRetry(
+    session,
+    reviewer,
+    `The user requested changes and the team applied them.
+
+USER'S FEEDBACK: "${feedback}"
+ORIGINAL BRIEF: "${session.brief.slice(0, 300)}"
+
+Do a FOCUSED review:
+1. Did the changes address the user's feedback? Go through each point.
+2. Did anything break? Check for missing styles, broken JS, or structural issues.
+3. Is the overall quality still high?
+
+Be concise — this is a revision review, not a full audit.
+If there are critical issues, MESSAGE @maja and @leo with fixes.
+Include SCORES in your THINKING block.`
+  )
+
+  if (session.aborted) return
+
+  if (reviewResponse) {
+    parseAgentResponse(session, 'reviewer', reviewResponse)
+
+    // Parse scores
+    const scoresMatch = reviewResponse.match(/SCORES:\s*responsiveness=(\d+)\s+aesthetics=(\d+)\s+accessibility=(\d+)\s+interactivity=(\d+)\s+content=(\d+)\s+brief_compliance=(\d+)/i)
+    if (scoresMatch) {
+      session.reviewScores = {
+        responsiveness: parseInt(scoresMatch[1]),
+        aesthetics: parseInt(scoresMatch[2]),
+        accessibility: parseInt(scoresMatch[3]),
+        interactivity: parseInt(scoresMatch[4]),
+        content: parseInt(scoresMatch[5]),
+        briefCompliance: parseInt(scoresMatch[6]),
+      }
+      const avgScore = Object.values(session.reviewScores).reduce((a, b) => a + b, 0) / 6
+      session.send('review_scores', { scores: session.reviewScores, average: avgScore.toFixed(1) })
+    }
+  }
+
+  session.setProgress(85, 'Review complete')
+  await sleep(400)
+
+  // ── PHASE 4: QUICK FIX (if review found issues) ──
+  if (session.reviewComments.length > 0 && !session.aborted) {
+    session.sendPhaseChange('FIXING')
+    session.setProgress(88, 'Applying final fixes')
+
+    const fixResponse = await callAgentWithRetry(
+      session,
+      frontendDev,
+      `Nova found issues in the revision. Fix them:
+${session.reviewComments.map(c => `- ${c.file}:${c.line || '?'} — ${c.comment}`).join('\n')}
+
+Output COMPLETE updated files.`
+    )
+
+    if (fixResponse && !session.aborted) {
+      parseAgentResponse(session, 'frontend-dev', fixResponse)
+    }
+  }
+
+  if (session.aborted) return
+
+  // ── PHASE 5: COMPLETE ──
+  session.updatePreview()
+  session.sendPhaseChange('POLISHING')
+  session.setProgress(95, 'Final polish')
+
+  session.sendMessage('architect', `Revision complete. Applied the user's requested changes: "${feedback.slice(0, 100)}..."`, null)
+  session.sendMessage('reviewer', 'Revision reviewed and approved. Changes look solid.', null)
+
+  session.sendPhaseChange('COMPLETE')
+  session.setProgress(100, 'Revision complete')
+
+  session.updatePreview()
+
+  // Save revised build to disk
+  const previewUrl = await saveBuildToDisk(session)
+
+  const tokenUsage = tokenTracker.getSessionUsage(session.id)
+  const summary = `Revision applied: ${feedback.slice(0, 200)}. The team updated ${session.fs.files.size} files to match your requested changes.`
+
+  session.send('build_complete', {
+    files: session.fs.toArray(),
+    summary,
+    fileCount: session.fs.files.size,
+    skippedPhases: session.skippedPhases,
+    qaRounds: 0,
+    tokenUsage: tokenUsage?.total || null,
+    previewUrl: previewUrl || null,
+    reviewScores: session.reviewScores || null,
+    pagesCreated: session.fs.getPaths().filter(p => p.endsWith('.html')),
+    imagesDownloaded: session.downloadedImages?.length || 0,
+  })
+
+  logger.info('Revision', `Complete ${session.id.slice(0, 8)} -- ${session.fs.files.size} files revised`, {
+    tokenUsage: tokenUsage?.total || {},
+  })
+}
 
 async function runBuild(session) {
   const { config } = session

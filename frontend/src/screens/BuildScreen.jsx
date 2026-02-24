@@ -77,7 +77,7 @@ function ActivityLog({ messages }) {
   )
 }
 
-export default function BuildScreen({ brief, config, onComplete, onStartOver }) {
+export default function BuildScreen({ brief, config, onComplete, onStartOver, revisionFeedback, previousFiles }) {
   const socket = useBuilderSocket()
   const fs = useFileSystem()
 
@@ -178,11 +178,16 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
     const curr = socket.connectionState
     prevConnectionRef.current = curr
 
-    // First connect: start the build
+    // First connect: start the build (or revision)
     if (curr === 'connected' && !buildStarted) {
       setBuildStarted(true)
       setBuildError(null)
-      socket.startBuild(brief, config)
+      if (revisionFeedback && previousFiles) {
+        socket.requestRevision(null, revisionFeedback)
+        socket.emit('start_build', { brief, config, revisionFeedback, previousFiles })
+      } else {
+        socket.startBuild(brief, config)
+      }
       return
     }
 
@@ -192,7 +197,11 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
       setBuildProgress(0)
       setBuildPhase('PLANNING')
       setMessages([])
-      socket.startBuild(brief, config)
+      if (revisionFeedback && previousFiles) {
+        socket.emit('start_build', { brief, config, revisionFeedback, previousFiles })
+      } else {
+        socket.startBuild(brief, config)
+      }
       toast('Reconnected — restarting build', { duration: 3000 })
       return
     }
@@ -208,7 +217,7 @@ export default function BuildScreen({ brief, config, onComplete, onStartOver }) 
       setBuildPhase('ERROR')
       toast.error('Connection failed — could not reach the server', { duration: 8000 })
     }
-  }, [socket.connectionState, buildStarted, socket, brief, config, buildPhase])
+  }, [socket.connectionState, buildStarted, socket, brief, config, buildPhase, revisionFeedback, previousFiles])
 
   const handleSendFeedback = useCallback(() => {
     if (!feedback.trim()) return

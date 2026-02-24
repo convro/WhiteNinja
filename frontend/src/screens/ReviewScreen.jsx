@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { motion } from 'framer-motion'
-import { Download, RotateCcw, CheckCircle, FileCode, ExternalLink, Copy, Check } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Download, RotateCcw, CheckCircle, FileCode, ExternalLink, Copy, Check, Send, MessageSquarePlus, Loader } from 'lucide-react'
 import { toast } from 'sonner'
 import './ReviewScreen.css'
 
-export default function ReviewScreen({ result, brief, onStartOver }) {
+export default function ReviewScreen({ result, brief, onStartOver, onRequestRevision, isRevising, revisionCount }) {
   const files = result?.files || []
   const previewUrl = result?.previewUrl || null
   const [copied, setCopied] = useState(false)
+  const [revisionFeedback, setRevisionFeedback] = useState('')
+  const [showRevisionInput, setShowRevisionInput] = useState(false)
 
   const fullPreviewUrl = previewUrl
     ? `${window.location.origin}${previewUrl}`
@@ -52,6 +54,13 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
     }
   }
 
+  const handleSubmitRevision = () => {
+    if (!revisionFeedback.trim()) return
+    onRequestRevision(revisionFeedback.trim())
+    setRevisionFeedback('')
+    setShowRevisionInput(false)
+  }
+
   return (
     <div className="review-screen">
       <div className="review-orb" />
@@ -73,8 +82,12 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
             <CheckCircle size={40} />
           </motion.div>
           <div>
-            <h2>Build Complete!</h2>
-            <p>The team of 5 agents successfully built your website.</p>
+            <h2>{revisionCount > 0 ? `Revision #${revisionCount} Complete!` : 'Build Complete!'}</h2>
+            <p>
+              {revisionCount > 0
+                ? `Applied your changes — revision ${revisionCount} is ready for review.`
+                : 'The team of 5 agents successfully built your website.'}
+            </p>
           </div>
         </div>
 
@@ -147,6 +160,85 @@ export default function ReviewScreen({ result, brief, onStartOver }) {
               Preview link unavailable — download the ZIP below to view locally.
             </p>
           )}
+        </motion.div>
+
+        {/* Revision Feedback Section */}
+        <motion.div
+          className="review-revision"
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.4 }}
+        >
+          <div className="review-section-label">
+            Request Changes
+            {revisionCount > 0 && <span className="review-revision-badge">iteration {revisionCount + 1}</span>}
+          </div>
+
+          <AnimatePresence mode="wait">
+            {isRevising ? (
+              <motion.div
+                key="revising"
+                className="review-revision-loading"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+              >
+                <Loader size={18} className="review-revision-spinner" />
+                <span>Agents are applying your changes...</span>
+              </motion.div>
+            ) : !showRevisionInput ? (
+              <motion.button
+                key="toggle"
+                className="btn btn-secondary review-revision-toggle"
+                onClick={() => setShowRevisionInput(true)}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <MessageSquarePlus size={16} />
+                Something to change? Tell the agents
+              </motion.button>
+            ) : (
+              <motion.div
+                key="input"
+                className="review-revision-input-wrap"
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+              >
+                <textarea
+                  className="input review-revision-textarea"
+                  placeholder="Describe what you'd like changed... (e.g. 'Make the hero section darker, add a testimonials section, change the CTA text to Sign Up Free')"
+                  value={revisionFeedback}
+                  onChange={e => setRevisionFeedback(e.target.value)}
+                  autoFocus
+                  rows={4}
+                  maxLength={3000}
+                />
+                <div className="review-revision-actions">
+                  <span className="review-revision-char-count">
+                    {revisionFeedback.length} / 3000
+                  </span>
+                  <button
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => { setShowRevisionInput(false); setRevisionFeedback('') }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-primary btn-sm review-revision-submit"
+                    onClick={handleSubmitRevision}
+                    disabled={!revisionFeedback.trim()}
+                  >
+                    <Send size={13} />
+                    Send to Agents
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
 
         {/* Actions */}

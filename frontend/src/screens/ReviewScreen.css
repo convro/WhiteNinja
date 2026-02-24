@@ -222,6 +222,90 @@
   min-width: 160px;
 }
 
+/* ── Revision Feedback ── */
+.review-revision {
+  background: var(--bg-card);
+  border: 1px solid rgba(168, 85, 247, 0.25);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+
+.review-revision-badge {
+  background: rgba(168, 85, 247, 0.15);
+  color: #a855f7;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.review-revision-toggle {
+  width: 100%;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 12px;
+  font-size: 14px;
+  border: 1px dashed rgba(168, 85, 247, 0.3);
+  color: var(--text-secondary);
+  transition: all var(--transition-base);
+}
+
+.review-revision-toggle:hover {
+  border-color: rgba(168, 85, 247, 0.5);
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.05);
+}
+
+.review-revision-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  overflow: hidden;
+}
+
+.review-revision-textarea {
+  resize: vertical;
+  min-height: 100px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.review-revision-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.review-revision-char-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  margin-right: auto;
+}
+
+.review-revision-submit {
+  gap: var(--space-1);
+}
+
+.review-revision-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  color: #a855f7;
+  font-size: 14px;
+}
+
+.review-revision-spinner {
+  animation: review-spin 1s linear infinite;
+}
+
+@keyframes review-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .review-screen {
