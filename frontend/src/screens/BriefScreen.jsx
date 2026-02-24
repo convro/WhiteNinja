@@ -25,7 +25,7 @@ export default function BriefScreen({ onSubmit, onBack, isAnalyzing = false }) {
     setCharCount(example.length)
   }
 
-  const MAX_CHARS = 3600
+  const MAX_CHARS = 9800
   const canSubmit = brief.trim().length >= 20
 
   return (
@@ -78,7 +78,7 @@ export default function BriefScreen({ onSubmit, onBack, isAnalyzing = false }) {
             rows={9}
             maxLength={MAX_CHARS}
           />
-          <div className="brief-char-count" style={{ color: charCount > 3000 ? 'var(--warning)' : '' }}>
+          <div className="brief-char-count" style={{ color: charCount > 9000 ? 'var(--warning)' : '' }}>
             {charCount} / {MAX_CHARS}
           </div>
         </div>

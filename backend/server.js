@@ -58,7 +58,7 @@ const AGENT_CALL_TIMEOUT_MS = 300 * 1000 // 300 seconds per API call (later phas
 const AGENT_MAX_TOKENS = 64000 // DeepSeek Reasoner supports up to 64K output tokens
 const API_RETRY_COUNT = 3
 const BRIEF_MIN_LENGTH = 10
-const BRIEF_MAX_LENGTH = 5000
+const BRIEF_MAX_LENGTH = 9800
 const TEST_BUILDS_DIR = join(dirname(fileURLToPath(import.meta.url)), 'test-builds')
 const TEST_BUILDS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
